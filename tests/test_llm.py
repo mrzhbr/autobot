@@ -3,9 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from autobot.config import Config
-from autobot.llm import HttpLLM
+from autobot.llm import HttpLLM, _priced
 from autobot.models import ContextFile, Issue, Usage
 
 
@@ -55,6 +56,32 @@ class LLMTests(unittest.TestCase):
         self.assertIn("Do not implement product code", prompt)
         self.assertIn("Plan before writing", prompt)
         self.assertIn("source file at or below 400 lines", prompt)
+
+    def test_pricing_uses_role_specific_env_vars(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "REVIEW_INPUT_PRICE_PER_1K": "0.001",
+                "REVIEW_OUTPUT_PRICE_PER_1K": "0.002",
+            },
+            clear=True,
+        ):
+            self.assertEqual(_priced("review", 1000, 500), 0.002)
+
+    def test_pricing_returns_none_when_prices_are_missing(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(_priced("triage", 1000, 1000))
+
+    def test_test_author_pricing_falls_back_to_implement_prices(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "IMPLEMENT_INPUT_PRICE_PER_1K": "0.003",
+                "IMPLEMENT_OUTPUT_PRICE_PER_1K": "0.006",
+            },
+            clear=True,
+        ):
+            self.assertEqual(_priced("test", 2000, 500), 0.009)
 
 
 def _llm() -> CapturingLLM:

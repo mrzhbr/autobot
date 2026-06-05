@@ -50,9 +50,13 @@ export TRIAGE_INPUT_PRICE_PER_1K=0.002
 export TRIAGE_OUTPUT_PRICE_PER_1K=0.008
 export IMPLEMENT_INPUT_PRICE_PER_1K=0.002
 export IMPLEMENT_OUTPUT_PRICE_PER_1K=0.008
+export TEST_INPUT_PRICE_PER_1K=0.002
+export TEST_OUTPUT_PRICE_PER_1K=0.008
 export REVIEW_INPUT_PRICE_PER_1K=0.002
 export REVIEW_OUTPUT_PRICE_PER_1K=0.008
 ```
+
+If `TEST_*` prices are unset, test-authoring uses the configured `IMPLEMENT_*` prices.
 
 ## Commands
 

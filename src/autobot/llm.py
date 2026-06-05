@@ -301,8 +301,13 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _priced(role: str, input_tokens: Any, output_tokens: Any) -> float | None:
-    in_price = os.getenv(f"{role.upper()}_INPUT_PRICE_PER_1K")
-    out_price = os.getenv(f"{role.upper()}_OUTPUT_PRICE_PER_1K")
+    price_role = "IMPLEMENT" if role == "test" else role.upper()
+    in_price = os.getenv(f"{role.upper()}_INPUT_PRICE_PER_1K") or os.getenv(
+        f"{price_role}_INPUT_PRICE_PER_1K"
+    )
+    out_price = os.getenv(f"{role.upper()}_OUTPUT_PRICE_PER_1K") or os.getenv(
+        f"{price_role}_OUTPUT_PRICE_PER_1K"
+    )
     if not in_price or not out_price:
         return None
     total = (int(input_tokens or 0) / 1000) * float(in_price)
