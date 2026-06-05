@@ -103,9 +103,10 @@ class LinkedIssueTracker(PagedIssueTracker):
 
 
 class LabelTracker(GitHubIssueTracker):
-    def __init__(self, status_code: int = 422) -> None:
+    def __init__(self, status_code: int = 422, create_status_code: int | None = None) -> None:
         super().__init__("token", "bot")
         self.status_code = status_code
+        self.create_status_code = create_status_code
         self.requests: list[tuple[str, str, dict | None]] = []
         self.label_attempts = 0
 
@@ -117,6 +118,8 @@ class LabelTracker(GitHubIssueTracker):
                 raise GitHubError("label failed", status_code=self.status_code)
             return {}
         if path == "/repos/owner/repo/labels":
+            if self.create_status_code is not None:
+                raise GitHubError("create label failed", status_code=self.create_status_code)
             return {"name": body["name"] if body else ""}
         return {}
 
@@ -230,6 +233,25 @@ class GitHubSafetyTests(unittest.TestCase):
                 ("POST", "/repos/owner/repo/issues/7/labels", {"labels": ["agent-waiting"]}),
             ],
         )
+
+    def test_set_label_tolerates_label_create_race(self) -> None:
+        tracker = LabelTracker(create_status_code=422)
+
+        tracker.set_label("owner/repo", 7, "agent-waiting")
+
+        self.assertEqual(tracker.label_attempts, 2)
+        self.assertEqual(
+            tracker.requests[-1],
+            ("POST", "/repos/owner/repo/issues/7/labels", {"labels": ["agent-waiting"]}),
+        )
+
+    def test_set_label_does_not_mask_label_create_errors(self) -> None:
+        tracker = LabelTracker(create_status_code=500)
+
+        with self.assertRaisesRegex(GitHubError, "create label failed"):
+            tracker.set_label("owner/repo", 7, "agent-waiting")
+
+        self.assertEqual(tracker.label_attempts, 1)
 
     def test_set_label_does_not_mask_non_validation_errors(self) -> None:
         tracker = LabelTracker(status_code=500)

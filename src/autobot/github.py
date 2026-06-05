@@ -89,11 +89,15 @@ class GitHubIssueTracker:
         except GitHubError as exc:
             if exc.status_code != 422:
                 raise
-            self._request(
-                "POST",
-                f"/repos/{repo}/labels",
-                {"name": label, "color": "ededed"},
-            )
+            try:
+                self._request(
+                    "POST",
+                    f"/repos/{repo}/labels",
+                    {"name": label, "color": "ededed"},
+                )
+            except GitHubError as create_exc:
+                if create_exc.status_code != 422:
+                    raise
             self._request(
                 "POST", f"/repos/{repo}/issues/{issue_number}/labels", {"labels": [label]}
             )
