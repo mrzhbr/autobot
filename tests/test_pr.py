@@ -95,13 +95,14 @@ class PrBodyTests(unittest.TestCase):
             Issue("owner/repo", 1, "Add filter", "Body", "alice", []),
             record,
             CostLedger(),
-            ["python -m pytest"],
+            ["printf `value`"],
             "before\n```\nafter",
             {"state": "success"},
         )
 
         self.assertIn("````json", body)
         self.assertIn('"body": "Use ``` in the label."', body)
+        self.assertIn("- `` printf `value` ``", body)
         self.assertIn("````text\nbefore\n```\nafter\n````", body)
 
 

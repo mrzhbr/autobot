@@ -37,7 +37,7 @@ def build_pr_body(
         + "\n\n"
         "## Verification\n"
         f"- Acceptance test baseline: {baseline_state}\n"
-        + "\n".join(f"- `{command}`" for command in verification_commands)
+        + "\n".join(f"- {_inline_code(command)}" for command in verification_commands)
         + test_details
         + "## Cost\n"
         f"- Input tokens: {ledger.input_tokens}\n"
@@ -55,6 +55,14 @@ def _fenced_block(language: str, content: str) -> str:
     while fence in content:
         fence += "`"
     return f"{fence}{language}\n{content}\n{fence}"
+
+
+def _inline_code(content: str) -> str:
+    fence = "`"
+    while fence in content:
+        fence += "`"
+    padding = " " if content.startswith("`") or content.endswith("`") else ""
+    return f"{fence}{padding}{content}{padding}{fence}"
 
 
 def _wall_seconds(started_at: str) -> str:
