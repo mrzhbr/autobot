@@ -224,11 +224,27 @@ class GitHubGitHost:
     def ci_status(self, repo: str, branch: str) -> dict:
         tracker = GitHubIssueTracker(self.token, None)
         encoded = urllib.parse.quote(branch, safe="")
+        errors: list[str] = []
+        status: dict[str, Any] = {}
+        checks: dict[str, Any] = {}
         try:
             status = tracker._request("GET", f"/repos/{repo}/commits/{encoded}/status")
         except GitHubError as exc:
-            return {"state": "unknown", "error": str(exc)}
-        return {"state": status.get("state"), "statuses": status.get("statuses", [])}
+            errors.append(str(exc))
+        try:
+            checks = tracker._request("GET", f"/repos/{repo}/commits/{encoded}/check-runs")
+        except GitHubError as exc:
+            errors.append(str(exc))
+        statuses = status.get("statuses", []) if isinstance(status, dict) else []
+        check_runs = checks.get("check_runs", []) if isinstance(checks, dict) else []
+        result = {
+            "state": _combined_ci_state(status.get("state"), statuses, check_runs, errors),
+            "statuses": statuses,
+            "check_runs": [_summarize_check_run(run) for run in check_runs],
+        }
+        if errors:
+            result["errors"] = errors
+        return result
 
     def _default_branch(self, repo: str) -> str:
         data = GitHubIssueTracker(self.token, None)._request("GET", f"/repos/{repo}")
@@ -251,3 +267,37 @@ class GitHubGitHost:
             message = redact_secret_like_values((result.stderr or result.stdout).strip())
             raise GitHubError(message or "git command failed")
         return result.stdout.strip()
+
+
+def _combined_ci_state(
+    legacy_state: str | None,
+    statuses: list[dict],
+    check_runs: list[dict],
+    errors: list[str],
+) -> str:
+    status_state = legacy_state if statuses else None
+    failed_checks = {"failure", "cancelled", "timed_out", "action_required", "startup_failure"}
+    if status_state in {"failure", "error"} or any(
+        run.get("conclusion") in failed_checks for run in check_runs
+    ):
+        return "failure"
+    if status_state == "pending" or any(
+        run.get("status") != "completed" or not run.get("conclusion") for run in check_runs
+    ):
+        return "pending"
+    if status_state == "success" or any(
+        run.get("conclusion") in {"success", "neutral", "skipped"} for run in check_runs
+    ):
+        return "success"
+    if errors:
+        return "unknown"
+    return "no_checks"
+
+
+def _summarize_check_run(run: dict) -> dict:
+    return {
+        "name": run.get("name"),
+        "status": run.get("status"),
+        "conclusion": run.get("conclusion"),
+        "html_url": run.get("html_url"),
+    }

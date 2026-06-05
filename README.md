@@ -133,6 +133,8 @@ Implemented defaults:
 - issue comments for `ChatChannel`
 - OpenAI or Anthropic HTTP calls for `LLM`
 
+CI evidence combines legacy commit statuses and GitHub check runs for the pushed branch.
+
 Issue reads include the newest comment page from GitHub pagination links, so clarification replies after the first 100 comments are still available to the resume loop without walking every page.
 
 Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.py`.

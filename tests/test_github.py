@@ -50,6 +50,22 @@ class RecordingTracker:
         return {"html_url": "https://github.test/pull/1"}
 
 
+class CITracker:
+    requests: list[tuple[str, str, dict | None]] = []
+    responses: dict[str, dict] = {}
+    errors: dict[str, GitHubError] = {}
+
+    def __init__(self, token: str | None, agent_login: str | None) -> None:
+        self.token = token
+        self.agent_login = agent_login
+
+    def _request(self, method: str, path: str, body: dict | None = None):
+        self.requests.append((method, path, body))
+        if path in self.errors:
+            raise self.errors[path]
+        return self.responses[path]
+
+
 class CommentRecordingTracker(GitHubIssueTracker):
     def __init__(self) -> None:
         super().__init__("token", "bot")
@@ -154,6 +170,9 @@ class LabelTracker(GitHubIssueTracker):
 class GitHubSafetyTests(unittest.TestCase):
     def setUp(self) -> None:
         RecordingTracker.requests = []
+        CITracker.requests = []
+        CITracker.responses = {}
+        CITracker.errors = {}
 
     def test_refuses_default_like_branch_names(self) -> None:
         host = RecordingGitHost()
@@ -279,6 +298,104 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, body["body"])
         self.assertIn("[redacted-secret]", body["title"])
         self.assertIn("[redacted-secret]", body["body"])
+
+    def test_ci_status_combines_commit_statuses_and_check_runs(self) -> None:
+        CITracker.responses = {
+            "/repos/owner/repo/commits/autobot%2Fissue-1/status": {
+                "state": "success",
+                "statuses": [{"context": "legacy", "state": "success"}],
+            },
+            "/repos/owner/repo/commits/autobot%2Fissue-1/check-runs": {
+                "check_runs": [
+                    {
+                        "name": "tests",
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.test/checks/1",
+                        "output": {"summary": "large payload omitted from summary"},
+                    }
+                ]
+            },
+        }
+        host = RecordingGitHost()
+
+        with patch("autobot.github.GitHubIssueTracker", CITracker):
+            status = host.ci_status("owner/repo", "autobot/issue-1")
+
+        self.assertEqual(status["state"], "success")
+        self.assertEqual(status["statuses"], [{"context": "legacy", "state": "success"}])
+        self.assertEqual(
+            status["check_runs"],
+            [
+                {
+                    "name": "tests",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "html_url": "https://github.test/checks/1",
+                }
+            ],
+        )
+        self.assertEqual(
+            [request[:2] for request in CITracker.requests],
+            [
+                ("GET", "/repos/owner/repo/commits/autobot%2Fissue-1/status"),
+                ("GET", "/repos/owner/repo/commits/autobot%2Fissue-1/check-runs"),
+            ],
+        )
+
+    def test_ci_status_marks_failed_check_run_as_failure(self) -> None:
+        CITracker.responses = {
+            "/repos/owner/repo/commits/autobot%2Fissue-1/status": {
+                "state": "success",
+                "statuses": [{"context": "legacy", "state": "success"}],
+            },
+            "/repos/owner/repo/commits/autobot%2Fissue-1/check-runs": {
+                "check_runs": [{"name": "tests", "status": "completed", "conclusion": "failure"}]
+            },
+        }
+        host = RecordingGitHost()
+
+        with patch("autobot.github.GitHubIssueTracker", CITracker):
+            status = host.ci_status("owner/repo", "autobot/issue-1")
+
+        self.assertEqual(status["state"], "failure")
+
+    def test_ci_status_uses_successful_checks_when_legacy_statuses_are_empty(self) -> None:
+        CITracker.responses = {
+            "/repos/owner/repo/commits/autobot%2Fissue-1/status": {
+                "state": "pending",
+                "statuses": [],
+            },
+            "/repos/owner/repo/commits/autobot%2Fissue-1/check-runs": {
+                "check_runs": [{"name": "tests", "status": "completed", "conclusion": "success"}]
+            },
+        }
+        host = RecordingGitHost()
+
+        with patch("autobot.github.GitHubIssueTracker", CITracker):
+            status = host.ci_status("owner/repo", "autobot/issue-1")
+
+        self.assertEqual(status["state"], "success")
+
+    def test_ci_status_keeps_legacy_status_when_check_runs_request_fails(self) -> None:
+        CITracker.responses = {
+            "/repos/owner/repo/commits/autobot%2Fissue-1/status": {
+                "state": "success",
+                "statuses": [{"context": "legacy", "state": "success"}],
+            }
+        }
+        CITracker.errors = {
+            "/repos/owner/repo/commits/autobot%2Fissue-1/check-runs": GitHubError(
+                "checks unavailable"
+            )
+        }
+        host = RecordingGitHost()
+
+        with patch("autobot.github.GitHubIssueTracker", CITracker):
+            status = host.ci_status("owner/repo", "autobot/issue-1")
+
+        self.assertEqual(status["state"], "success")
+        self.assertEqual(status["errors"], ["checks unavailable"])
 
     def test_request_json_body_redacts_token_like_values(self) -> None:
         token = "ghp_" + ("A" * 36)
