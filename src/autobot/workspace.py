@@ -6,6 +6,11 @@ from pathlib import Path
 from autobot.models import Issue
 
 
+def repo_work_dir(work_root: Path, issue: Issue) -> Path:
+    repo_key = issue.repo.replace("/", "__")
+    return work_root / repo_key / str(issue.number) / "repo"
+
+
 def branch_name(issue: Issue) -> str:
     slug = "".join(char if char.isalnum() else "-" for char in issue.title.lower()).strip("-")
     slug = "-".join(filter(None, slug.split("-")))[:48] or "change"

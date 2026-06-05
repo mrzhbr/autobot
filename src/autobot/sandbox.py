@@ -112,3 +112,25 @@ class LocalSandbox:
         if result.returncode != 0:
             raise SandboxError((result.stdout + "\n" + result.stderr).strip())
         return result.stdout.strip()
+
+
+def apply_changes(
+    repo_dir: Path,
+    sandbox: DockerSandbox,
+    changes: list[FileChange],
+    dry_run: bool,
+) -> None:
+    if dry_run:
+        LocalSandbox(repo_dir).apply_changes(changes)
+    else:
+        sandbox.apply_changes(changes)
+
+
+def run_verification(sandbox: DockerSandbox, commands: list[str], dry_run: bool) -> str:
+    output: list[str] = []
+    for command in commands:
+        if dry_run:
+            output.append(f"$ {command}\ndry-run skipped")
+        else:
+            output.append(f"$ {command}\n{sandbox.run(command)}")
+    return "\n\n".join(output)

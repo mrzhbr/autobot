@@ -11,13 +11,17 @@ from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr import build_pr_body
-from autobot.resume import PausedForHuman, resume_after_comment_id
+from autobot.resume import (
+    PausedForHuman,
+    mark_clarification_still_needed,
+    resume_after_comment_id,
+)
 from autobot.review import ReviewerPanel, format_blockers
-from autobot.sandbox import DockerSandbox
+from autobot.sandbox import DockerSandbox, apply_changes, run_verification
 from autobot.scanner import find_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import detect_verification_commands
-from autobot.workspace import branch_name, changed_files, prepare_dry_run_repo
+from autobot.workspace import branch_name, changed_files, prepare_dry_run_repo, repo_work_dir
 
 
 class IssueProcessor:
@@ -92,6 +96,16 @@ class IssueProcessor:
             except PausedForHuman as exc:
                 return self._finish(record, ledger, str(exc), None, started)
             if not triage.ready:
+                if resumed and previous_blocked_on == "clarification":
+                    mark_clarification_still_needed(record, triage.questions, triage.reason)
+                    self.store.upsert(record)
+                    return self._finish(
+                        record,
+                        ledger,
+                        "still needs clarification after reply",
+                        None,
+                        started,
+                    )
                 return self._ask_and_wait(issue, record, ledger, triage.questions, started)
             record.transition(IssueState.SPEC_READY)
             self.store.upsert(record)
@@ -111,7 +125,7 @@ class IssueProcessor:
         return self._finish(record, ledger, "opened draft pull request", pr_url, started)
 
     def _clone_and_branch(self, issue: Issue, record: IssueRecord) -> Path:
-        repo_dir = self._repo_dir(issue)
+        repo_dir = repo_work_dir(self.config.work_root, issue)
         branch = record.branch or branch_name(issue)
         record.branch = branch
         if self.config.dry_run:
@@ -245,7 +259,7 @@ class IssueProcessor:
             "at": utc_now(),
         }
         self.store.upsert(record)
-        self._apply_changes(repo_dir, sandbox, plan.changes)
+        apply_changes(repo_dir, sandbox, plan.changes, self.config.dry_run)
         detected_commands = detect_verification_commands(
             repo_dir,
             self.config.default_test_command,
@@ -255,7 +269,7 @@ class IssueProcessor:
         verification_commands.extend(detected_commands.types)
         record.plan["verification_commands"] = verification_commands
         self.store.upsert(record)
-        test_output = self._run_tests(sandbox, verification_commands)
+        test_output = run_verification(sandbox, verification_commands, self.config.dry_run)
 
         record.transition(IssueState.REVIEW_LOOP)
         self.store.upsert(record)
@@ -279,8 +293,8 @@ class IssueProcessor:
             self._pause_if_budget_hit(issue, record, ledger, "review fix")
             if not fix.changes:
                 raise RuntimeError("implementer returned no fixes for blocking findings")
-            self._apply_changes(repo_dir, sandbox, fix.changes)
-            test_output = self._run_tests(sandbox, verification_commands)
+            apply_changes(repo_dir, sandbox, fix.changes, self.config.dry_run)
+            test_output = run_verification(sandbox, verification_commands, self.config.dry_run)
 
         diff = self.git_host.current_diff(repo_dir)
         secrets = find_secret_like_values(diff)
@@ -318,14 +332,6 @@ class IssueProcessor:
         self.store.upsert(record)
         return pr_url
 
-    def _apply_changes(self, repo_dir: Path, sandbox: DockerSandbox, changes) -> None:
-        if self.config.dry_run:
-            from autobot.sandbox import LocalSandbox
-
-            LocalSandbox(repo_dir).apply_changes(changes)
-        else:
-            sandbox.apply_changes(changes)
-
     def _pause_if_budget_hit(
         self,
         issue: Issue,
@@ -360,15 +366,6 @@ class IssueProcessor:
         self.store.upsert(record)
         raise PausedForHuman(text)
 
-    def _run_tests(self, sandbox: DockerSandbox, commands: list[str]) -> str:
-        output: list[str] = []
-        for command in commands:
-            if self.config.dry_run:
-                output.append(f"$ {command}\ndry-run skipped")
-            else:
-                output.append(f"$ {command}\n{sandbox.run(command)}")
-        return "\n\n".join(output)
-
     def _finish(
         self,
         record: IssueRecord,
@@ -393,7 +390,3 @@ class IssueProcessor:
             files_touched=record.files_touched,
             blocked_on=record.blocked_on,
         )
-
-    def _repo_dir(self, issue: Issue) -> Path:
-        repo_key = issue.repo.replace("/", "__")
-        return self.config.work_root / repo_key / str(issue.number) / "repo"

@@ -100,6 +100,12 @@ class BudgetLLM(SequencedLLM):
         )
 
 
+class AlwaysNotReadyLLM(SequencedLLM):
+    def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
+        self.triage_calls += 1
+        return TriageDecision(False, ["Still unclear."], "The answer did not resolve the spec.")
+
+
 class PipelineTests(unittest.TestCase):
     def test_waiting_state_resumes_after_human_reply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,6 +199,41 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(loaded.blocked_on, "budget")
             self.assertEqual(loaded.conversation["budget_pause"]["phase"], "triage")
+
+    def test_clarification_reply_reruns_triage_once_without_second_question(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker()
+            store = StateStore(config.db_path)
+            llm = AlwaysNotReadyLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = processor.process("owner/repo", 1)
+            tracker.comments.append(
+                IssueComment(1, "alice", "Not enough detail.", "2026-06-05T00:01:00Z")
+            )
+            second = processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(second.message, "still needs clarification after reply")
+            self.assertEqual(llm.triage_calls, 2)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.blocked_on, "clarification")
+            self.assertEqual(
+                loaded.conversation["clarification_after_resume"]["questions"],
+                ["Still unclear."],
+            )
 
     def test_out_of_scope_issue_pauses_before_implementation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
