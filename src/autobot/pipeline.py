@@ -41,7 +41,6 @@ class IssueProcessor:
     def process(self, repo: str, issue_number: int) -> ProcessResult:
         started = time.monotonic()
         self.comments_this_run = 0
-        issue = self.tracker.get(repo, issue_number)
         record = self.store.ensure(repo, issue_number)
         ledger = CostLedger(record.cost)
 
@@ -54,6 +53,13 @@ class IssueProcessor:
                 None,
                 started,
             )
+
+        if record.state == IssueState.PR_OPEN:
+            return finish_process(
+                self.store, record, ledger, "draft pull request already open", None, started
+            )
+
+        issue = self.tracker.get(repo, issue_number)
 
         resumed = False
         previous_blocked_on = record.blocked_on
@@ -69,11 +75,6 @@ class IssueProcessor:
             if not resumed:
                 return finish_process(self.store, record, ledger, waiting_message, None, started)
             self.store.upsert(record)
-
-        if record.state == IssueState.PR_OPEN:
-            return finish_process(
-                self.store, record, ledger, "draft pull request already open", None, started
-            )
 
         topics = detect_out_of_scope(issue)
         if resumed and topics and previous_blocked_on == "out_of_scope":

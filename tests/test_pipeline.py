@@ -74,6 +74,11 @@ class WaitingLabelFailTracker(FakeTracker):
             raise RuntimeError("waiting label failed")
 
 
+class IssueReadFailTracker(FakeTracker):
+    def get(self, repo: str, issue_number: int) -> Issue:
+        raise RuntimeError("issue read failed")
+
+
 class CommentAuditFail:
     def record(self, action: str, repo: str, issue_number: int, details: dict) -> None:
         if action == "comment":
@@ -586,6 +591,30 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result.message, "draft pull request already open")
             self.assertEqual(llm.triage_calls, 0)
 
+    def test_pr_open_rerun_does_not_read_issue_before_returning_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            store = StateStore(config.db_path)
+            record = store.ensure("owner/repo", 1)
+            record.transition(IssueState.PR_OPEN)
+            record.pr_url = "https://github.test/pull/1"
+            store.upsert(record)
+
+            result = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=IssueReadFailTracker(),
+                git_host=CloneFailGitHost(),
+                chat=IssueCommentChat(IssueReadFailTracker()),
+                llm=SequencedLLM(),
+                audit=AuditLog(config.audit_path),
+            ).process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(result.pr_url, "https://github.test/pull/1")
+            self.assertEqual(result.message, "draft pull request already open")
+
     def test_pr_open_label_failure_does_not_abandon_opened_pr(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -777,6 +806,30 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("clear the state record", result.message)
             self.assertEqual(llm.triage_calls, 0)
             self.assertFalse(config.work_root.exists())
+
+    def test_abandoned_rerun_does_not_read_issue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            store = StateStore(config.db_path)
+            record = store.ensure("owner/repo", 1)
+            record.transition(IssueState.ABANDONED)
+            record.blocked_on = "sandbox command failed"
+            store.upsert(record)
+
+            result = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=IssueReadFailTracker(),
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(IssueReadFailTracker()),
+                llm=SequencedLLM(),
+                audit=AuditLog(config.audit_path),
+            ).process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.ABANDONED)
+            self.assertEqual(result.blocked_on, "sandbox command failed")
+            self.assertIn("clear the state record", result.message)
 
     def test_abandoned_error_redacts_token_like_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
