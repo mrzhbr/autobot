@@ -25,14 +25,16 @@ def build_pr_body(
     assumptions_json = json.dumps(assumptions, indent=2, sort_keys=True)
     test_details = (
         "\n\n<details><summary>Test output</summary>\n\n"
-        f"```text\n{test_output[-8000:]}\n```\n</details>\n\n"
+        + _fenced_block("text", test_output[-8000:])
+        + "\n</details>\n\n"
     )
     body = (
         f"Implements #{issue.number}.\n\n"
         "## Summary\n"
         + "\n".join(f"- {item}" for item in record.plan.get("plan", []))
         + "\n\n## Assumptions / clarifications\n"
-        f"```json\n{assumptions_json}\n```\n\n"
+        + _fenced_block("json", assumptions_json)
+        + "\n\n"
         "## Verification\n"
         f"- Acceptance test baseline: {baseline_state}\n"
         + "\n".join(f"- `{command}`" for command in verification_commands)
@@ -46,6 +48,13 @@ def build_pr_body(
         f"- CI status: {ci_status.get('state', 'unknown')}\n"
     )
     return redact_secret_like_values(body)
+
+
+def _fenced_block(language: str, content: str) -> str:
+    fence = "```"
+    while fence in content:
+        fence += "`"
+    return f"{fence}{language}\n{content}\n{fence}"
 
 
 def _wall_seconds(started_at: str) -> str:

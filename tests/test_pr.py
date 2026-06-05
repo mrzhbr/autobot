@@ -86,6 +86,24 @@ class PrBodyTests(unittest.TestCase):
         self.assertNotIn(token, body)
         self.assertIn("[redacted-secret]", body)
 
+    def test_body_fences_backticks_in_assumptions_and_test_output(self) -> None:
+        record = IssueRecord("owner/repo", 1)
+        record.plan = {"plan": ["Render PR body safely."]}
+        record.conversation["human_replies"] = [{"body": "Use ``` in the label."}]
+
+        body = build_pr_body(
+            Issue("owner/repo", 1, "Add filter", "Body", "alice", []),
+            record,
+            CostLedger(),
+            ["python -m pytest"],
+            "before\n```\nafter",
+            {"state": "success"},
+        )
+
+        self.assertIn("````json", body)
+        self.assertIn('"body": "Use ``` in the label."', body)
+        self.assertIn("````text\nbefore\n```\nafter\n````", body)
+
 
 if __name__ == "__main__":
     unittest.main()
