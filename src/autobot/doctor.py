@@ -9,8 +9,10 @@ from autobot.config import (
     Config,
     configured_llm_models,
     infer_llm_provider,
+    invalid_price_vars,
     missing_model_keys,
     missing_model_keys_message,
+    missing_price_vars,
     model_providers,
 )
 from autobot.github import GitHubIssueTracker
@@ -174,14 +176,14 @@ def _llm_pricing_check(config: Config) -> CheckResult:
     provider = infer_llm_provider(config.llm_provider)
     if provider not in {"openai", "anthropic"}:
         return CheckResult("llm pricing", "skip", "valid LLM_PROVIDER required")
-    invalid = _invalid_price_vars()
+    invalid = invalid_price_vars()
     if invalid:
         return CheckResult(
             "llm pricing",
             "fail",
             "LLM pricing env vars must be numeric: " + ", ".join(invalid),
         )
-    missing = _missing_price_vars()
+    missing = missing_price_vars()
     if missing:
         return CheckResult(
             "llm pricing",
@@ -191,35 +193,6 @@ def _llm_pricing_check(config: Config) -> CheckResult:
     return CheckResult(
         "llm pricing", "pass", "triage, implement, test, and review prices configured"
     )
-
-
-def _missing_price_vars() -> list[str]:
-    missing: list[str] = []
-    for role in ("TRIAGE", "IMPLEMENT", "REVIEW"):
-        missing.extend(_missing_role_price_vars(role))
-    if _missing_role_price_vars("TEST") and _missing_role_price_vars("IMPLEMENT"):
-        missing.extend(_missing_role_price_vars("TEST"))
-    return missing
-
-
-def _missing_role_price_vars(role: str) -> list[str]:
-    names = [f"{role}_INPUT_PRICE_PER_1K", f"{role}_OUTPUT_PRICE_PER_1K"]
-    return [name for name in names if not os.getenv(name)]
-
-
-def _invalid_price_vars() -> list[str]:
-    invalid = []
-    for role in ("TRIAGE", "IMPLEMENT", "TEST", "REVIEW"):
-        for suffix in ("INPUT", "OUTPUT"):
-            name = f"{role}_{suffix}_PRICE_PER_1K"
-            value = os.getenv(name)
-            if not value:
-                continue
-            try:
-                float(value)
-            except ValueError:
-                invalid.append(name)
-    return invalid
 
 
 def _sandbox_image_check(config: Config) -> CheckResult:

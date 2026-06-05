@@ -9,6 +9,8 @@ ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4")
 ANTHROPIC_MODEL_PREFIXES = ("claude-",)
 LLM_KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+PRICE_ROLES = ("TRIAGE", "IMPLEMENT", "TEST", "REVIEW")
+PRICE_DIRECTIONS = ("INPUT", "OUTPUT")
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,47 @@ def model_providers(default_provider: str | None, models: list[str]) -> list[str
         return []
     providers = [provider_for_model(default_provider, model) for model in models]
     return list(dict.fromkeys(providers))
+
+
+def missing_price_vars() -> list[str]:
+    missing: list[str] = []
+    for role in ("TRIAGE", "IMPLEMENT", "REVIEW"):
+        missing.extend(missing_role_price_vars(role))
+    if missing_role_price_vars("TEST") and missing_role_price_vars("IMPLEMENT"):
+        missing.extend(missing_role_price_vars("TEST"))
+    return missing
+
+
+def missing_role_price_vars(role: str) -> list[str]:
+    return [name for name in role_price_var_names(role) if not os.getenv(name)]
+
+
+def invalid_price_vars() -> list[str]:
+    invalid = []
+    for role in PRICE_ROLES:
+        for name in role_price_var_names(role):
+            value = os.getenv(name)
+            if not value:
+                continue
+            try:
+                float(value)
+            except ValueError:
+                invalid.append(name)
+    return invalid
+
+
+def role_price_var_names(role: str) -> list[str]:
+    return [f"{role}_{direction}_PRICE_PER_1K" for direction in PRICE_DIRECTIONS]
+
+
+def price_value(name: str) -> float | None:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
 
 
 def _default_model(provider: str | None) -> str:

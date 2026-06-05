@@ -119,6 +119,27 @@ class CliTests(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY", stderr.getvalue())
         self.assertIn("claude-sonnet-4-20250514", stderr.getvalue())
 
+    def test_live_run_rejects_invalid_llm_pricing_before_processor(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GITHUB_TOKEN": "x",
+                    "OPENAI_API_KEY": "x",
+                    "REVIEW_INPUT_PRICE_PER_1K": "not-a-number",
+                },
+                clear=True,
+            ),
+            patch("autobot.cli._processor") as processor,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 1)
+        processor.assert_not_called()
+        self.assertIn("REVIEW_INPUT_PRICE_PER_1K", stderr.getvalue())
+        self.assertIn("must be numeric", stderr.getvalue())
+
     def test_live_run_accepts_mixed_review_models_when_keys_exist(self) -> None:
         processor = FakeWatchProcessor()
         with (
@@ -167,6 +188,27 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         tracker.assert_not_called()
         self.assertIn("OPENAI_API_KEY or ANTHROPIC_API_KEY is required", stderr.getvalue())
+
+    def test_live_watch_rejects_invalid_llm_pricing_before_tracker(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GITHUB_TOKEN": "x",
+                    "OPENAI_API_KEY": "x",
+                    "IMPLEMENT_OUTPUT_PRICE_PER_1K": "not-a-number",
+                },
+                clear=True,
+            ),
+            patch("autobot.cli.GitHubIssueTracker") as tracker,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["watch", "--repo", "owner/repo", "--once"])
+
+        self.assertEqual(code, 1)
+        tracker.assert_not_called()
+        self.assertIn("IMPLEMENT_OUTPUT_PRICE_PER_1K", stderr.getvalue())
+        self.assertIn("must be numeric", stderr.getvalue())
 
     def test_watch_once_processes_actionable_issues_sequentially(self) -> None:
         tracker = FakeWatchTracker([2, 3])

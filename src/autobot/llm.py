@@ -12,6 +12,7 @@ from autobot.config import (
     infer_llm_provider,
     missing_model_keys,
     missing_model_keys_message,
+    price_value,
     provider_for_model,
 )
 from autobot.context import format_context
@@ -361,10 +362,7 @@ def _role_price(role: str, direction: str) -> float | None:
 
 
 def _price_value(name: str) -> float | None:
-    value = os.getenv(name)
-    if value in (None, ""):
-        return None
     try:
-        return float(value)
+        return price_value(name)
     except ValueError as exc:
-        raise LLMError(f"{name} must be a number") from exc
+        raise LLMError(str(exc)) from exc

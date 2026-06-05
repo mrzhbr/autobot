@@ -54,7 +54,7 @@ export LLM_PROVIDER=anthropic
 export MODEL=claude-sonnet-4-20250514
 ```
 
-Optional cost pricing is read from env. If unset, token usage is recorded and dollars are reported as `not configured`; `doctor` warns about missing live pricing and fails nonnumeric pricing values before a run.
+Optional cost pricing is read from env. If unset, token usage is recorded and dollars are reported as `not configured`; live `run`, `watch`, and `doctor` fail nonnumeric pricing values before processing an issue, and `doctor` warns about missing live pricing.
 
 ```sh
 export TRIAGE_INPUT_PRICE_PER_1K=0.002
@@ -101,7 +101,7 @@ Check live-run prerequisites without posting comments, pushing branches, or open
 
 Live doctor checks Git, git author identity, Docker, GitHub credentials, LLM credentials, model names, LLM pricing env vars, sandbox image/network/setup settings, and optional issue readability.
 
-Live `run` and `watch` also fail fast when required GitHub or LLM credentials are missing, before cloning or processing an issue. Use `doctor` for the fuller read-only preflight.
+Live `run` and `watch` also fail fast when required GitHub or LLM credentials are missing, when provider-specific model keys are missing, and when configured LLM pricing values are malformed, before cloning or processing an issue. Use `doctor` for the fuller read-only preflight.
 
 Run a local dry-run against a public issue body:
 

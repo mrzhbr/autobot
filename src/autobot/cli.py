@@ -13,6 +13,7 @@ from autobot.config import (
     Config,
     configured_llm_models,
     infer_llm_provider,
+    invalid_price_vars,
     missing_model_keys,
     missing_model_keys_message,
 )
@@ -149,6 +150,9 @@ def _ensure_live_llm_key(config: Config) -> None:
     missing = missing_model_keys(provider, configured_llm_models(config))
     if missing:
         raise RuntimeError(missing_model_keys_message(missing))
+    invalid = invalid_price_vars()
+    if invalid:
+        raise RuntimeError("LLM pricing env vars must be numeric: " + ", ".join(invalid))
 
 
 def _parser() -> argparse.ArgumentParser:
