@@ -17,6 +17,10 @@ def resume_after_comment_id(record: IssueRecord) -> int:
     return max(ids)
 
 
+def latest_comment_id(issue: Issue) -> int:
+    return max((comment.id for comment in issue.comments), default=0)
+
+
 def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bool:
     resume_after = resume_after_comment_id(record)
     replies = [

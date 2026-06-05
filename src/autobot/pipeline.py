@@ -173,7 +173,7 @@ class IssueProcessor:
         if self.comments_this_run >= self.config.comment_limit:
             raise RuntimeError("comment limit reached before guardrail question could be posted")
         if self.config.dry_run:
-            comment_id = 0
+            comment_id = resume.latest_comment_id(issue)
         else:
             comment_id = self.chat.ask(issue, [question])
             self.comments_this_run += 1
@@ -210,7 +210,7 @@ class IssueProcessor:
         if self.comments_this_run >= self.config.comment_limit:
             raise RuntimeError("comment limit reached before clarification could be posted")
         if self.config.dry_run:
-            comment_id = 0
+            comment_id = resume.latest_comment_id(issue)
         else:
             comment_id = self.chat.ask(issue, questions[:3])
             self.comments_this_run += 1

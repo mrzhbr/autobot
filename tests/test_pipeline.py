@@ -408,6 +408,37 @@ class PipelineTests(unittest.TestCase):
                 ["Which behavior should be used?"],
             )
 
+    def test_dry_run_waiting_ignores_comments_before_question(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker()
+            tracker.comments.append(
+                IssueComment(3, "alice", "Older discussion.", "2026-06-05T00:00:00Z")
+            )
+            store = StateStore(config.db_path)
+            llm = SequencedLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = processor.process("owner/repo", 1)
+            second = processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(second.message, "waiting for a human answer")
+            self.assertEqual(llm.triage_calls, 1)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.conversation["asked_comment_id"], 3)
+
     def test_review_fix_commands_and_files_are_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
