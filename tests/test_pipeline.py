@@ -349,6 +349,23 @@ class DuplicateFileFixLLM(BlockingFixLLM):
         return super().implement(issue, context, review_findings)
 
 
+class NoTestCommandLLM(SequencedLLM):
+    def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
+        return TriageDecision(True, [], "Ready.")
+
+    def write_tests(self, issue: Issue, context: list[ContextFile]) -> ImplementationPlan:
+        return ImplementationPlan(
+            plan=["Write acceptance test without a command."],
+            changes=[
+                FileChange(
+                    f"tests/test_issue_{issue.number}.py",
+                    "def test_acceptance():\n    assert True\n",
+                )
+            ],
+            test_commands=[],
+        )
+
+
 class PipelineTests(unittest.TestCase):
     def test_waiting_state_resumes_after_human_reply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -401,6 +418,40 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(
                 loaded.plan["verification_commands"],
                 ["python -m pytest", "true", "python -m unittest discover -s tests"],
+            )
+
+    def test_test_author_without_commands_uses_detected_baseline_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=NoTestCommandLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(
+                result.verification_commands,
+                ["python -m unittest discover -s tests", "true"],
+            )
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(
+                loaded.plan["acceptance_test_commands"],
+                ["python -m unittest discover -s tests"],
+            )
+            self.assertIn(
+                "$ python -m unittest discover -s tests",
+                loaded.plan["acceptance_test_baseline"]["output"],
             )
 
     def test_waiting_state_survives_store_and_processor_restart(self) -> None:

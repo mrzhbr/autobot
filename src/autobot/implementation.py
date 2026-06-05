@@ -112,9 +112,12 @@ class ImplementationRunner:
         if not test_plan.changes:
             raise RuntimeError("test author returned no changes")
         sandbox_ops.apply_changes(repo_dir, sandbox, test_plan.changes, dry_run)
-        baseline = sandbox_ops.run_verification_allow_failure(
-            sandbox, test_plan.test_commands, dry_run
+        baseline_commands = _baseline_test_commands(
+            repo_dir,
+            test_plan.test_commands,
+            self.config.default_test_command,
         )
+        baseline = sandbox_ops.run_verification_allow_failure(sandbox, baseline_commands, dry_run)
         plan = self.llm.implement(issue, gather_context(repo_dir, issue))
         ledger.add(plan.usage)
         self.pause_if_budget_hit(issue, record, ledger, "implementation")
@@ -122,22 +125,22 @@ class ImplementationRunner:
             raise RuntimeError("implementer returned no changes")
         all_changes = [*test_plan.changes, *plan.changes]
         impl_commands = list(plan.test_commands)
-        sandbox_ops.ensure_no_secret_commands([*test_plan.test_commands, *impl_commands])
+        sandbox_ops.ensure_no_secret_commands([*baseline_commands, *impl_commands])
         record.plan = _plan_artifact(
             test_plan.plan,
             baseline,
             plan.plan,
-            test_plan.test_commands,
+            baseline_commands,
             plan.test_commands,
         )
         self.store.upsert(record)
         sandbox_ops.apply_changes(repo_dir, sandbox, plan.changes, dry_run)
         detected = detect_verification_commands(repo_dir, self.config.default_test_command)
-        commands = merge_commands(test_plan.test_commands, impl_commands, detected)
+        commands = merge_commands(baseline_commands, impl_commands, detected)
         output = self._run_verification(record, sandbox, commands, dry_run)
         return WorkArtifacts(
             all_changes,
-            list(test_plan.test_commands),
+            baseline_commands,
             impl_commands,
             detected,
             commands,
@@ -226,17 +229,29 @@ def _plan_artifact(
     acceptance_tests: list[str],
     baseline: dict,
     plan: list[str],
-    test_author_commands: list[str],
+    acceptance_test_commands: list[str],
     test_commands: list[str],
 ) -> dict:
     return {
         "acceptance_tests": acceptance_tests,
         "acceptance_test_baseline": baseline,
         "plan": plan,
-        "test_author_commands": test_author_commands,
+        "acceptance_test_commands": acceptance_test_commands,
+        "test_author_commands": acceptance_test_commands,
         "test_commands": test_commands,
         "at": utc_now(),
     }
+
+
+def _baseline_test_commands(
+    repo_dir: Path,
+    authored_commands: list[str],
+    configured: str | None,
+) -> list[str]:
+    commands = [command.strip() for command in authored_commands if command.strip()]
+    if not commands:
+        commands = detect_verification_commands(repo_dir, configured).tests
+    return list(dict.fromkeys(commands))
 
 
 def _unique_paths(changes: list[FileChange]) -> list[str]:
