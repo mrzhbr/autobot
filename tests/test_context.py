@@ -61,6 +61,11 @@ class ContextTests(unittest.TestCase):
         self.assertNotIn(token, formatted)
         self.assertEqual(formatted.count("[redacted-secret]"), 2)
 
+    def test_formatted_context_uses_fence_that_content_cannot_close(self) -> None:
+        formatted = format_context([ContextFile("README.md", "before\n```text\ninside\n```\n")])
+
+        self.assertIn("````text\nbefore\n```text\ninside\n```\n\n````", formatted)
+
 
 def _issue(title: str, comments: list[IssueComment] | None = None) -> Issue:
     return Issue("owner/repo", 1, title, "Please implement it.", "alice", [], comments or [])

@@ -212,7 +212,7 @@ The prototype enforces these guardrails:
 - Scopes review, final secret scan, and final commit to model-authored test, implementation, and review-fix paths, avoiding sandbox setup byproducts.
 - Treats model-authored Git paths literally during scoped diff and commit operations, so Git pathspec magic cannot broaden the selected files.
 - Truncates long clarification strings in draft PR assumptions while keeping the JSON valid.
-- Uses Markdown delimiters that cannot be closed by generated assumptions, verification commands, or test output when composing draft PR bodies.
+- Uses Markdown delimiters that cannot be closed by generated assumptions, verification commands, test output, or formatted repo context.
 - Redacts token-like values from CLI, doctor output, GitHub command, GitHub HTTP/network, GitHub write payloads, LLM prompt issue text, repo context, and provider errors, SQLite state, abandoned-state, sandbox failure output, verification-output, PR body, audit, and issue-comment messages.
 - Caps issue comments per processed issue with nonnegative `COMMENT_LIMIT_PER_RUN`.
 - Persists posted comment ids before audit and label metadata, preventing duplicate clarification comments after a local metadata failure.

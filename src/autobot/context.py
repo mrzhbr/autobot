@@ -69,8 +69,15 @@ def format_context(files: list[ContextFile]) -> str:
     for item in files:
         path = redact_secret_like_values(item.path)
         content = redact_secret_like_values(item.content)
-        chunks.append(f"### {path}\n```text\n{content}\n```")
+        chunks.append(f"### {path}\n{_fenced_block('text', content)}")
     return "\n\n".join(chunks)
+
+
+def _fenced_block(language: str, content: str) -> str:
+    fence = "```"
+    while fence in content:
+        fence += "`"
+    return f"{fence}{language}\n{content}\n{fence}"
 
 
 def _priority_files(repo_dir: Path) -> list[Path]:
