@@ -109,6 +109,25 @@ class LLMTests(unittest.TestCase):
         self.assertIn("Comments:\nalice: Use a dropdown, not radio buttons.", prompt)
         self.assertIn("Diff:\ndiff --git", prompt)
 
+    def test_prompt_comments_redact_secret_like_author(self) -> None:
+        llm = _llm()
+        token = "ghp_" + ("A" * 36)
+        issue = Issue(
+            "owner/repo",
+            1,
+            "Add filter",
+            "Use a filter control.",
+            "alice",
+            [],
+            [IssueComment(7, token, "Use a dropdown.", "2026-06-05")],
+        )
+
+        llm.review("correctness", issue, "diff --git a/app.py b/app.py")
+
+        _, _, prompt = llm.calls[-1]
+        self.assertNotIn(token, prompt)
+        self.assertIn("Comments:\n[redacted-secret]: Use a dropdown.", prompt)
+
     def test_prompt_comments_are_truncated(self) -> None:
         llm = _llm()
         body = "start " + ("x" * 2200) + " tail"
@@ -147,6 +166,16 @@ class LLMTests(unittest.TestCase):
         _, _, prompt = llm.calls[-1]
         self.assertNotIn(token, prompt)
         self.assertGreaterEqual(prompt.count("[redacted-secret]"), 3)
+
+    def test_implement_prompt_redacts_secret_like_review_findings(self) -> None:
+        llm = _llm()
+        token = "ghp_" + ("A" * 36)
+
+        llm.implement(_issue(), [ContextFile("README.md", "# Demo\n")], [f"Leaked {token}"])
+
+        _, _, prompt = llm.calls[-1]
+        self.assertNotIn(token, prompt)
+        self.assertIn("Leaked [redacted-secret]", prompt)
 
     def test_review_prompt_redacts_secret_like_diff_text(self) -> None:
         llm = _llm()

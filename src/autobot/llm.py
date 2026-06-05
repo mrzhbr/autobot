@@ -137,7 +137,7 @@ class HttpLLM:
         context: list[ContextFile],
         review_findings: list[str] | None = None,
     ) -> ImplementationPlan:
-        findings = "\n".join(review_findings or [])
+        findings = "\n".join(_prompt_text(finding) for finding in review_findings or [])
         prompt = (
             "You are implementing a GitHub issue in a checked-out repository. "
             "Return strict JSON with keys: plan array of strings, changes array, "
@@ -329,10 +329,12 @@ def _parse_json(text: str) -> dict[str, Any]:
 def _comments(issue: Issue) -> str:
     if not issue.comments:
         return "None"
-    return "\n\n".join(
-        f"{comment.author}: {_truncate(_prompt_text(comment.body), COMMENT_TEXT_LIMIT)}"
-        for comment in issue.comments[-12:]
-    )
+    return "\n\n".join(_comment_prompt(comment) for comment in issue.comments[-12:])
+
+
+def _comment_prompt(comment) -> str:
+    body = _truncate(_prompt_text(comment.body), COMMENT_TEXT_LIMIT)
+    return f"{_prompt_text(comment.author)}: {body}"
 
 
 def _issue_prompt(issue: Issue) -> str:
