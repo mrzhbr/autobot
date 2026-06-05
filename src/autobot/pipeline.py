@@ -12,6 +12,7 @@ from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.models import Issue, IssueRecord, IssueState, utc_now
 from autobot.pr import build_pr_body
+from autobot.resume import resume_after_comment_id
 from autobot.review import ReviewerPanel, format_blockers
 from autobot.sandbox import DockerSandbox
 from autobot.scanner import find_secret_like_values
@@ -125,7 +126,7 @@ class IssueProcessor:
         return repo_dir
 
     def _resume_if_answered(self, record: IssueRecord, issue: Issue) -> bool:
-        asked_comment_id = int(record.conversation.get("asked_comment_id") or 0)
+        resume_after = resume_after_comment_id(record)
         bot = self.config.agent_login
         replies = [
             {
@@ -135,7 +136,7 @@ class IssueProcessor:
                 "created_at": comment.created_at,
             }
             for comment in issue.comments
-            if comment.id > asked_comment_id and comment.author != bot
+            if comment.id > resume_after and comment.author != bot
         ]
         if not replies:
             return False
@@ -171,6 +172,7 @@ class IssueProcessor:
             "comment_id": comment_id,
             "at": utc_now(),
         }
+        record.conversation["resume_after_comment_id"] = comment_id
         record.blocked_on = "out_of_scope"
         self.store.upsert(record)
         record.transition(IssueState.WAITING)
@@ -201,6 +203,7 @@ class IssueProcessor:
         record.conversation["asked_comment_id"] = comment_id
         record.conversation["asked_at"] = utc_now()
         record.conversation["asked_questions"] = questions[:3]
+        record.conversation["resume_after_comment_id"] = comment_id
         self.store.upsert(record)
         record.blocked_on = "clarification"
         record.transition(IssueState.WAITING)
@@ -342,6 +345,7 @@ class IssueProcessor:
             "at": utc_now(),
             "cost": ledger.to_dict(),
         }
+        record.conversation["resume_after_comment_id"] = 0
         record.blocked_on = "budget"
         if not self.config.dry_run:
             if self.comments_this_run >= self.config.comment_limit:
@@ -352,6 +356,7 @@ class IssueProcessor:
             self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
             self.audit.record("label", issue.repo, issue.number, {"label": "agent-waiting"})
             record.conversation["budget_pause"]["comment_id"] = comment_id
+            record.conversation["resume_after_comment_id"] = comment_id
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
         raise PausedForHuman(text)
