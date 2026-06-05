@@ -66,11 +66,15 @@ def _command_check(name: str, command: list[str], command_runner: Callable) -> C
     try:
         result = command_runner(command, capture_output=True, text=True, check=False, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
-        return CheckResult(name, "fail", str(exc))
+        return CheckResult(name, "fail", redact_secret_like_values(str(exc)))
     if result.returncode != 0:
-        return CheckResult(name, "fail", (result.stderr or result.stdout).strip())
+        return CheckResult(
+            name,
+            "fail",
+            redact_secret_like_values((result.stderr or result.stdout).strip()),
+        )
     first_line = (result.stdout or "").splitlines()[0] if result.stdout else "available"
-    return CheckResult(name, "pass", first_line)
+    return CheckResult(name, "pass", redact_secret_like_values(first_line))
 
 
 def _git_identity_check(config: Config, command_runner: Callable) -> CheckResult:
