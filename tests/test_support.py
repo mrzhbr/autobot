@@ -8,6 +8,7 @@ from unittest.mock import patch
 from autobot.config import Config
 from autobot.cost import CostLedger
 from autobot.models import Usage
+from autobot.sandbox import LocalSandbox, run_verification_allow_failure
 from autobot.scanner import find_secret_like_values
 from autobot.tests import detect_verification_commands
 
@@ -57,6 +58,13 @@ class SupportTests(unittest.TestCase):
             self.assertEqual(commands.tests, ["npm test"])
             self.assertEqual(commands.lint, ["npm run lint"])
             self.assertEqual(commands.types, ["npm run typecheck"])
+
+    def test_baseline_verification_records_failures_without_raising(self) -> None:
+        with TemporaryDirectory() as tmp:
+            result = run_verification_allow_failure(LocalSandbox(Path(tmp)), ["false"], False)
+
+        self.assertEqual(result["ok"], False)
+        self.assertIn("$ false", result["output"])
 
     def test_config_parses_review_model_list(self) -> None:
         with (

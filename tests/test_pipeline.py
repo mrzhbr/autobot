@@ -162,6 +162,8 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.conversation["pr_url"], "dry-run://draft-pr")
             self.assertEqual(loaded.conversation["ci_status"]["state"], "dry-run")
             self.assertEqual(loaded.plan["acceptance_tests"], ["Write acceptance test."])
+            self.assertEqual(loaded.plan["acceptance_test_baseline"]["ok"], True)
+            self.assertIn("dry-run skipped", loaded.plan["acceptance_test_baseline"]["output"])
             self.assertEqual(loaded.plan["verification_commands"], ["python -m pytest", "true"])
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:

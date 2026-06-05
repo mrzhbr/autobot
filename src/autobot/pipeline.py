@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from autobot import resume
+from autobot import sandbox as sandbox_ops
 from autobot.adapters import LLM, ChatChannel, GitHost, IssueTracker
 from autobot.audit import AuditLog
 from autobot.config import Config
@@ -13,7 +14,6 @@ from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr import build_pr_body
 from autobot.review import ReviewerPanel, format_blockers
-from autobot.sandbox import DockerSandbox, apply_changes, run_verification
 from autobot.scanner import find_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import detect_verification_commands, merge_verification_commands
@@ -233,13 +233,14 @@ class IssueProcessor:
     ) -> str | None:
         record.transition(IssueState.IMPLEMENTING)
         self.store.upsert(record)
-        sandbox = DockerSandbox(
+        dry_run = self.config.dry_run
+        sandbox = sandbox_ops.DockerSandbox(
             repo_dir,
             self.config.sandbox_image,
             self.config.sandbox_setup_command,
             self.config.sandbox_network,
         )
-        if not self.config.dry_run:
+        if not dry_run:
             self.tracker.set_label(issue.repo, issue.number, "agent-working")
             self.audit.record("label", issue.repo, issue.number, {"label": "agent-working"})
             sandbox.prepare()
@@ -249,7 +250,10 @@ class IssueProcessor:
         self._pause_if_budget_hit(issue, record, ledger, "test authoring")
         if not test_plan.changes:
             raise RuntimeError("test author returned no changes")
-        apply_changes(repo_dir, sandbox, test_plan.changes, self.config.dry_run)
+        sandbox_ops.apply_changes(repo_dir, sandbox, test_plan.changes, dry_run)
+        baseline = sandbox_ops.run_verification_allow_failure(
+            sandbox, test_plan.test_commands, dry_run
+        )
 
         plan = self.llm.implement(issue, gather_context(repo_dir, issue))
         ledger.add(plan.usage)
@@ -258,13 +262,14 @@ class IssueProcessor:
             raise RuntimeError("implementer returned no changes")
         record.plan = {
             "acceptance_tests": test_plan.plan,
+            "acceptance_test_baseline": baseline,
             "plan": plan.plan,
             "test_author_commands": test_plan.test_commands,
             "test_commands": plan.test_commands,
             "at": utc_now(),
         }
         self.store.upsert(record)
-        apply_changes(repo_dir, sandbox, plan.changes, self.config.dry_run)
+        sandbox_ops.apply_changes(repo_dir, sandbox, plan.changes, dry_run)
         detected_commands = detect_verification_commands(
             repo_dir,
             self.config.default_test_command,
@@ -274,7 +279,7 @@ class IssueProcessor:
         )
         record.plan["verification_commands"] = verification_commands
         self.store.upsert(record)
-        test_output = run_verification(sandbox, verification_commands, self.config.dry_run)
+        test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
 
         record.transition(IssueState.REVIEW_LOOP)
         self.store.upsert(record)
@@ -298,14 +303,14 @@ class IssueProcessor:
             self._pause_if_budget_hit(issue, record, ledger, "review fix")
             if not fix.changes:
                 raise RuntimeError("implementer returned no fixes for blocking findings")
-            apply_changes(repo_dir, sandbox, fix.changes, self.config.dry_run)
-            test_output = run_verification(sandbox, verification_commands, self.config.dry_run)
+            sandbox_ops.apply_changes(repo_dir, sandbox, fix.changes, dry_run)
+            test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
 
         diff = self.git_host.current_diff(repo_dir)
         secrets = find_secret_like_values(diff)
         if secrets:
             raise RuntimeError(f"secret-like values found in diff: {secrets[:3]}")
-        if self.config.dry_run:
+        if dry_run:
             record.files_touched = [change.path for change in [*test_plan.changes, *plan.changes]]
             record.conversation["ci_status"] = {"state": "dry-run"}
             record.conversation["pr_url"] = "dry-run://draft-pr"
@@ -350,11 +355,8 @@ class IssueProcessor:
             "Autobot paused because the per-issue budget was reached during "
             f"{phase}. Increase `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS`, then rerun."
         )
-        record.conversation["budget_pause"] = {
-            "phase": phase,
-            "at": utc_now(),
-            "cost": ledger.to_dict(),
-        }
+        pause = {"phase": phase, "at": utc_now(), "cost": ledger.to_dict()}
+        record.conversation["budget_pause"] = pause
         record.conversation["resume_after_comment_id"] = 0
         record.blocked_on = "budget"
         if not self.config.dry_run:
@@ -365,7 +367,7 @@ class IssueProcessor:
             self.tracker.set_label(issue.repo, issue.number, "agent-waiting")
             self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
             self.audit.record("label", issue.repo, issue.number, {"label": "agent-waiting"})
-            record.conversation["budget_pause"]["comment_id"] = comment_id
+            pause["comment_id"] = comment_id
             record.conversation["resume_after_comment_id"] = comment_id
         record.transition(IssueState.WAITING)
         self.store.upsert(record)

@@ -134,3 +134,22 @@ def run_verification(sandbox: DockerSandbox, commands: list[str], dry_run: bool)
         else:
             output.append(f"$ {command}\n{sandbox.run(command)}")
     return "\n\n".join(output)
+
+
+def run_verification_allow_failure(
+    sandbox: DockerSandbox,
+    commands: list[str],
+    dry_run: bool,
+) -> dict:
+    output: list[str] = []
+    ok = True
+    for command in commands:
+        if dry_run:
+            output.append(f"$ {command}\ndry-run skipped")
+            continue
+        try:
+            output.append(f"$ {command}\n{sandbox.run(command)}")
+        except SandboxError as exc:
+            ok = False
+            output.append(f"$ {command}\n{exc}")
+    return {"ok": ok, "output": "\n\n".join(output)}
