@@ -280,19 +280,27 @@ class IssueProcessor:
         record.conversation["budget_pause"] = pause
         record.conversation["resume_after_comment_id"] = 0
         record.blocked_on = "budget"
+        comment_id: int | None = None
         if not self.config.dry_run:
             if self.comments_this_run >= self.config.comment_limit:
-                raise RuntimeError("comment limit reached before budget pause could be posted")
-            comment_id = self.chat.notify(issue, text)
-            self.comments_this_run += 1
-            pause["comment_id"] = comment_id
-            record.conversation["resume_after_comment_id"] = comment_id
+                pause["comment_skipped"] = "comment_limit"
+            else:
+                comment_id = self.chat.notify(issue, text)
+                self.comments_this_run += 1
+                pause["comment_id"] = comment_id
+                record.conversation["resume_after_comment_id"] = comment_id
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
         if not self.config.dry_run:
-            record_best_effort(
-                self.audit, "comment", issue.repo, issue.number, {"comment_id": comment_id}, record
-            )
+            if comment_id is not None:
+                record_best_effort(
+                    self.audit,
+                    "comment",
+                    issue.repo,
+                    issue.number,
+                    {"comment_id": comment_id},
+                    record,
+                )
             set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
             self.store.upsert(record)
         raise resume.PausedForHuman(text)

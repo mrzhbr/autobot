@@ -144,6 +144,7 @@ Dry-run waiting uses the current newest issue comment id as its resume marker, s
 
 If `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS` is reached, the agent records a `budget_pause`, moves the issue to `waiting`, and posts one human-facing notification in live mode. Human comments do not clear a budget pause; rerun after increasing the budget or changing the issue state.
 Reruns check previously recorded issue cost before issue reads, clone, or LLM work, so lowering a budget pauses immediately.
+If `COMMENT_LIMIT_PER_RUN=0`, budget pauses still persist in `waiting` but skip the issue comment.
 
 If an issue title or body appears to require authentication, cryptography, secrets handling, or database migrations, or if the issue text or comments contain raw secret-like values, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
 

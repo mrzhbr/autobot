@@ -1132,6 +1132,39 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.blocked_on, "budget")
             self.assertEqual(loaded.conversation["budget_pause"]["phase"], "triage")
 
+    def test_budget_pause_survives_zero_comment_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = replace(
+                Config.from_env(root=root, dry_run=False, mock_llm=True),
+                max_issue_tokens=1,
+                comment_limit=0,
+            )
+            tracker = FakeTracker()
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=BudgetLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.WAITING)
+            self.assertEqual(tracker.comments, [])
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.blocked_on, "budget")
+            self.assertEqual(loaded.conversation["budget_pause"]["phase"], "triage")
+            self.assertEqual(
+                loaded.conversation["budget_pause"]["comment_skipped"],
+                "comment_limit",
+            )
+
     def test_budget_pause_resumes_after_budget_is_increased(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
