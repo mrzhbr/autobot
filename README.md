@@ -144,6 +144,7 @@ The prototype enforces these guardrails:
 - Opens draft PRs only.
 - Refuses to push default-like branches such as `main` and `master`.
 - Does not force-push.
+- Resets reused live clones to the remote default branch before creating the issue branch.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation, and detected verification commands.
 - Scans the final diff for common secret-like values before commit and PR creation.

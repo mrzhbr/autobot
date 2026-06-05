@@ -130,7 +130,14 @@ class GitHubGitHost:
 
     def clone(self, repo: str, target_dir: Path) -> None:
         if target_dir.exists() and (target_dir / ".git").exists():
-            self._git(target_dir, ["fetch", "origin", "--prune"])
+            default_branch = self._default_branch(repo)
+            self._git(target_dir, self._auth_config() + ["fetch", "origin", "--prune"])
+            self._git(
+                target_dir,
+                ["checkout", "-B", default_branch, f"origin/{default_branch}"],
+            )
+            self._git(target_dir, ["reset", "--hard", f"origin/{default_branch}"])
+            self._git(target_dir, ["clean", "-fd"])
             return
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         cmd = self._auth_git_prefix() + ["clone", f"https://github.com/{repo}.git", str(target_dir)]

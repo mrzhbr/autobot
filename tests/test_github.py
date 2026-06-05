@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -125,6 +126,31 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn("--force", command)
         self.assertNotIn("--force-with-lease", command)
         self.assertEqual(command[-3:], ["push", "origin", "autobot/issue-1"])
+
+    def test_reused_clone_is_reset_to_remote_default_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_dir = Path(tmp) / "repo"
+            (repo_dir / ".git").mkdir(parents=True)
+            host = RecordingGitHost()
+
+            host.clone("owner/repo", repo_dir)
+
+        self.assertEqual(
+            host.commands,
+            [
+                [
+                    "git",
+                    "-c",
+                    "http.https://github.com/.extraheader=AUTHORIZATION: bearer token",
+                    "fetch",
+                    "origin",
+                    "--prune",
+                ],
+                ["git", "checkout", "-B", "main", "origin/main"],
+                ["git", "reset", "--hard", "origin/main"],
+                ["git", "clean", "-fd"],
+            ],
+        )
 
     def test_open_pull_request_payload_is_always_draft(self) -> None:
         host = RecordingGitHost()
