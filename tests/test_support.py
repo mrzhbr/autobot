@@ -10,7 +10,11 @@ from autobot.cost import CostLedger
 from autobot.models import Usage
 from autobot.sandbox import LocalSandbox, run_verification_allow_failure
 from autobot.scanner import find_secret_like_values
-from autobot.tests import detect_verification_commands
+from autobot.tests import (
+    VerificationCommands,
+    detect_verification_commands,
+    merge_verification_commands,
+)
 
 
 class SupportTests(unittest.TestCase):
@@ -70,8 +74,28 @@ class SupportTests(unittest.TestCase):
             commands = detect_verification_commands(root, None)
 
             self.assertEqual(commands.tests, ["npm test"])
-            self.assertEqual(commands.lint, ["npm run lint"])
-            self.assertEqual(commands.types, ["npm run typecheck"])
+        self.assertEqual(commands.lint, ["npm run lint"])
+        self.assertEqual(commands.types, ["npm run typecheck"])
+
+    def test_merge_keeps_authored_implementation_and_detected_tests(self) -> None:
+        commands = merge_verification_commands(
+            ["python -m pytest"],
+            ["python -m pytest -q"],
+            VerificationCommands(
+                tests=["python -m unittest discover -s tests"],
+                lint=["python -m ruff check ."],
+            ),
+        )
+
+        self.assertEqual(
+            commands,
+            [
+                "python -m pytest",
+                "python -m pytest -q",
+                "python -m unittest discover -s tests",
+                "python -m ruff check .",
+            ],
+        )
 
     def test_baseline_verification_records_failures_without_raising(self) -> None:
         with TemporaryDirectory() as tmp:

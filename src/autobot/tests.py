@@ -13,7 +13,7 @@ def merge_verification_commands(
     implementation_tests: list[str],
     detected: VerificationCommands,
 ) -> list[str]:
-    tests = [*authored_tests, *(implementation_tests or detected.tests)]
+    tests = [*authored_tests, *implementation_tests, *detected.tests]
     tests = list(dict.fromkeys(tests))
     return [*tests, *detected.lint, *detected.types]
 

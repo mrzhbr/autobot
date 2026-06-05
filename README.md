@@ -146,7 +146,7 @@ The prototype enforces these guardrails:
 - Does not force-push.
 - Resets reused live clones to the remote default branch before creating the issue branch.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
-- Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation, and detected verification commands.
+- Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
 - Scans the final diff for common secret-like values, including raw provider tokens, before commit and PR creation.
 - Caps issue comments per processed issue with `COMMENT_LIMIT_PER_RUN`.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.

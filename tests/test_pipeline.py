@@ -240,7 +240,10 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.plan["acceptance_tests"], ["Write acceptance test."])
             self.assertEqual(loaded.plan["acceptance_test_baseline"]["ok"], True)
             self.assertIn("dry-run skipped", loaded.plan["acceptance_test_baseline"]["output"])
-            self.assertEqual(loaded.plan["verification_commands"], ["python -m pytest", "true"])
+            self.assertEqual(
+                loaded.plan["verification_commands"],
+                ["python -m pytest", "true", "python -m unittest discover -s tests"],
+            )
 
     def test_waiting_state_survives_store_and_processor_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -311,7 +314,12 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(
                 loaded.plan["verification_commands"],
-                ["python -m pytest", "true", "python -m pytest -q"],
+                [
+                    "python -m pytest",
+                    "true",
+                    "python -m pytest -q",
+                    "python -m unittest discover -s tests",
+                ],
             )
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
