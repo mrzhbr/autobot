@@ -287,6 +287,21 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_url_errors_are_wrapped_and_redacted(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        error = urllib.error.URLError(f"network down {token}")
+        tracker = GitHubIssueTracker(token, "bot")
+
+        with (
+            patch("autobot.github.urllib.request.urlopen", side_effect=error),
+            self.assertRaises(GitHubError) as raised,
+        ):
+            tracker.get("owner/repo", 1)
+
+        self.assertIsNone(raised.exception.status_code)
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
+
     def test_comment_payload_redacts_token_like_values(self) -> None:
         token = "ghp_" + ("A" * 36)
         tracker = CommentRecordingTracker()

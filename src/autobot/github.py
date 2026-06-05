@@ -159,6 +159,9 @@ class GitHubIssueTracker:
                 f"GitHub {method} {path} failed: {exc.code} {payload}"
             )
             raise GitHubError(message, status_code=exc.code) from exc
+        except urllib.error.URLError as exc:
+            message = redact_secret_like_values(f"GitHub {method} {path} failed: {exc.reason}")
+            raise GitHubError(message) from exc
 
 
 def _last_link_page(link: str) -> int | None:
