@@ -4,9 +4,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from autobot.scanner import find_secret_like_values
+
 
 class StrictPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
 class TriagePayload(StrictPayload):
@@ -49,6 +51,14 @@ class ImplementationPayload(StrictPayload):
     @classmethod
     def strip_strings(cls, values: list[str]) -> list[str]:
         return [value.strip() for value in values if value.strip()]
+
+    @field_validator("test_commands")
+    @classmethod
+    def reject_secret_like_commands(cls, commands: list[str]) -> list[str]:
+        if secrets := find_secret_like_values("\n".join(commands)):
+            count = len(secrets)
+            raise ValueError(f"secret-like values found in test commands: {count} finding(s)")
+        return commands
 
 
 class ReviewFindingPayload(StrictPayload):

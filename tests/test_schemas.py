@@ -41,6 +41,21 @@ class SchemaTests(unittest.TestCase):
                 }
             )
 
+    def test_implementation_rejects_secret_like_test_commands_without_echoing_input(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        with self.assertRaises(ValidationError) as raised:
+            ImplementationPayload.model_validate(
+                {
+                    "plan": ["Run tests."],
+                    "changes": [{"path": "README.md", "content": "# Demo\n"}],
+                    "test_commands": [f"printf '%s' '{token}'"],
+                }
+            )
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("secret-like values found in test commands", str(raised.exception))
+
     def test_review_payload_accepts_empty_findings(self) -> None:
         payload = ReviewPayload.model_validate({"findings": []})
 

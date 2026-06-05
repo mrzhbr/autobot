@@ -8,7 +8,12 @@ from unittest.mock import patch
 from autobot.config import Config
 from autobot.cost import CostLedger
 from autobot.models import Usage
-from autobot.sandbox import LocalSandbox, run_verification, run_verification_allow_failure
+from autobot.sandbox import (
+    LocalSandbox,
+    SandboxError,
+    run_verification,
+    run_verification_allow_failure,
+)
 from autobot.scanner import find_secret_like_values, redact_secret_like_values
 from autobot.tests import (
     VerificationCommands,
@@ -113,29 +118,59 @@ class SupportTests(unittest.TestCase):
         self.assertIn("$ false", result["output"])
 
     def test_verification_output_redacts_token_like_values(self) -> None:
-        token = "ghp_" + ("A" * 36)
         with TemporaryDirectory() as tmp:
             result = run_verification(
                 LocalSandbox(Path(tmp)),
-                [f"printf '%s' '{token}'"],
+                ["python -c \"print('ghp_' + 'A' * 36)\""],
                 False,
             )
 
-        self.assertNotIn(token, result)
+        self.assertNotIn("ghp_" + ("A" * 36), result)
         self.assertIn("[redacted-secret]", result)
 
     def test_failing_verification_output_redacts_token_like_values(self) -> None:
-        token = "ghp_" + ("A" * 36)
         with TemporaryDirectory() as tmp:
             result = run_verification_allow_failure(
                 LocalSandbox(Path(tmp)),
-                [f"printf '%s' '{token}' && false"],
+                ["python -c \"print('ghp_' + 'A' * 36); raise SystemExit(1)\""],
                 False,
             )
 
         self.assertEqual(result["ok"], False)
-        self.assertNotIn(token, result["output"])
+        self.assertNotIn("ghp_" + ("A" * 36), result["output"])
         self.assertIn("[redacted-secret]", result["output"])
+
+    def test_verification_rejects_secret_like_commands_before_execution(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(SandboxError) as raised:
+                run_verification(
+                    LocalSandbox(root),
+                    [f"printf '%s' '{token}' > leaked.txt"],
+                    False,
+                )
+
+            self.assertFalse((root / "leaked.txt").exists())
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("secret-like values found in verification commands", str(raised.exception))
+
+    def test_allow_failure_rejects_secret_like_commands_before_execution(self) -> None:
+        token = "sk-" + ("A" * 40)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(SandboxError) as raised:
+                run_verification_allow_failure(
+                    LocalSandbox(root),
+                    [f"printf '%s' '{token}' > leaked.txt"],
+                    False,
+                )
+
+            self.assertFalse((root / "leaked.txt").exists())
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("secret-like values found in verification commands", str(raised.exception))
 
     def test_config_parses_review_model_list(self) -> None:
         with (
