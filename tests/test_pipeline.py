@@ -74,6 +74,12 @@ class WaitingLabelFailTracker(FakeTracker):
             raise RuntimeError("waiting label failed")
 
 
+class CommentAuditFail:
+    def record(self, action: str, repo: str, issue_number: int, details: dict) -> None:
+        if action == "comment":
+            raise RuntimeError("audit write failed")
+
+
 class FakeGitHost:
     def clone(self, repo: str, target_dir: Path) -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -538,6 +544,33 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(
                 any(row["action"] == "label_failed" for row in audit_rows),
             )
+
+    def test_comment_audit_failure_does_not_duplicate_clarification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker()
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=SequencedLLM(),
+                audit=CommentAuditFail(),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "audit write failed"):
+                processor.process("owner/repo", 1)
+            second = processor.process("owner/repo", 1)
+
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(len(tracker.comments), 1)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.WAITING)
+            self.assertEqual(loaded.conversation["asked_comment_id"], 1)
 
     def test_abandoned_rerun_does_not_restart_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -156,6 +156,7 @@ The prototype enforces these guardrails:
 - Scans issue text before triage, proposed changes before disk writes, verification commands before execution, and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.
 - Redacts token-like values from CLI, GitHub command, GitHub HTTP, GitHub write payloads, LLM provider, doctor issue-read, SQLite state, abandoned-state, verification-output, PR body, audit, and issue-comment messages.
 - Caps issue comments per processed issue with `COMMENT_LIMIT_PER_RUN`.
+- Persists posted comment ids before audit and label metadata, preventing duplicate clarification comments after a local metadata failure.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.
 - Creates those GitHub labels on first use if the target repo does not already have them, tolerating concurrent creation.
 - Records label failures in state and audit without undoing an already-posted comment or opened draft PR.

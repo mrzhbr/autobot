@@ -179,8 +179,6 @@ class IssueProcessor:
         else:
             comment_id = self.chat.ask(issue, [question])
             self.comments_this_run += 1
-            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
-            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
         record.transition(IssueState.ASKED)
         record.conversation["guardrail_pause"] = {
             "topics": topics,
@@ -193,6 +191,10 @@ class IssueProcessor:
         self.store.upsert(record)
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
+        if not self.config.dry_run:
+            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
+            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
+            self.store.upsert(record)
         return finish_process(
             self.store, record, ledger, "paused for out-of-scope guardrail", None, started
         )
@@ -214,8 +216,6 @@ class IssueProcessor:
         else:
             comment_id = self.chat.ask(issue, questions[:3])
             self.comments_this_run += 1
-            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
-            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
         record.transition(IssueState.ASKED)
         record.conversation["asked_comment_id"] = comment_id
         record.conversation["asked_at"] = utc_now()
@@ -225,6 +225,10 @@ class IssueProcessor:
         record.blocked_on = "clarification"
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
+        if not self.config.dry_run:
+            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
+            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
+            self.store.upsert(record)
         return finish_process(
             self.store,
             record,
@@ -380,10 +384,12 @@ class IssueProcessor:
                 raise RuntimeError("comment limit reached before budget pause could be posted")
             comment_id = self.chat.notify(issue, text)
             self.comments_this_run += 1
-            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
-            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
             pause["comment_id"] = comment_id
             record.conversation["resume_after_comment_id"] = comment_id
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
+        if not self.config.dry_run:
+            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
+            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
+            self.store.upsert(record)
         raise resume.PausedForHuman(text)
