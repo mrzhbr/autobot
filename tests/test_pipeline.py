@@ -61,6 +61,12 @@ class FakeTracker:
         return None
 
 
+class PostPrLabelFailTracker(FakeTracker):
+    def set_label(self, repo: str, issue_number: int, label: str) -> None:
+        if label == "agent-pr-open":
+            raise RuntimeError("label update failed")
+
+
 class FakeGitHost:
     def clone(self, repo: str, target_dir: Path) -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -455,6 +461,35 @@ class PipelineTests(unittest.TestCase):
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
             self.assertEqual(loaded.pr_url, "dry-run://draft-pr")
+
+    def test_pr_url_persists_if_post_pr_label_update_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = PostPrLabelFailTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with (
+                patch("autobot.sandbox.subprocess.run", return_value=completed),
+                self.assertRaisesRegex(RuntimeError, "label update failed"),
+            ):
+                processor.process("owner/repo", 1)
+
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.ABANDONED)
+            self.assertEqual(loaded.pr_url, "https://github.test/pull/1")
+            self.assertEqual(loaded.conversation["pr_url"], "https://github.test/pull/1")
 
     def test_abandoned_rerun_does_not_restart_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

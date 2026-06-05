@@ -350,14 +350,14 @@ class IssueProcessor:
             f"Draft: {issue.title}",
             build_pr_body(issue, record, ledger, verification_commands, test_output, ci_status),
         )
+        record.conversation["pr_url"] = pr_url
+        record.pr_url = pr_url
+        self.store.upsert(record)
         self.audit.record("draft_pr", issue.repo, issue.number, {"url": pr_url, "branch": branch})
         self.tracker.set_label(issue.repo, issue.number, "agent-pr-open")
         self.audit.record("label", issue.repo, issue.number, {"label": "agent-pr-open"})
-        record.conversation["pr_url"] = pr_url
-        record.pr_url = pr_url
         record.files_touched = changed_files(repo_dir)
         record.transition(IssueState.PR_OPEN)
-        record.cost = ledger.to_dict()
         self.store.upsert(record)
         return pr_url
 
