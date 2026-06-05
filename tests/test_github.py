@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -143,6 +144,63 @@ class LinkedIssueTracker(PagedIssueTracker):
                 }
             ]
         return super()._request(method, path, body)
+
+
+class ActionableLabelTracker(GitHubIssueTracker):
+    def __init__(self) -> None:
+        super().__init__("token", None)
+        self.requests: list[tuple[str, str]] = []
+
+    def _request(self, method: str, path: str, body: dict | None = None):
+        self.requests.append((method, path))
+        page = urllib.parse.parse_qs(urllib.parse.urlparse(path).query).get("page", [""])[0]
+        self._last_response_headers = {}
+        if page == "1":
+            self._last_response_headers = {
+                "Link": (
+                    "<https://api.github.com/repos/owner/repo/issues"
+                    '?state=open&labels=agent-ready&per_page=100&page=2>; rel="last"'
+                )
+            }
+            return [
+                {"id": 1, "number": 7},
+                {"id": 2, "number": 8, "pull_request": {}},
+            ]
+        if page == "2":
+            return [{"id": 3, "number": 9}]
+        raise AssertionError(path)
+
+
+class ActionableSearchTracker(GitHubIssueTracker):
+    def __init__(self) -> None:
+        super().__init__("token", "bot")
+        self.requests: list[tuple[str, str]] = []
+
+    def _request(self, method: str, path: str, body: dict | None = None):
+        self.requests.append((method, path))
+        parsed = urllib.parse.urlparse(path)
+        query = urllib.parse.parse_qs(parsed.query)
+        page = query.get("page", [""])[0]
+        search = query.get("q", [""])[0]
+        self._last_response_headers = {}
+        if "mentions:bot" in search and page == "1":
+            self._last_response_headers = {
+                "Link": (
+                    "<https://api.github.com/search/issues"
+                    '?q=mentions%3Abot&per_page=100&page=2>; rel="last"'
+                )
+            }
+            return {
+                "items": [
+                    {"id": 1, "number": 7},
+                    {"id": 2, "number": 8, "pull_request": {}},
+                ]
+            }
+        if "mentions:bot" in search and page == "2":
+            return {"items": [{"id": 3, "number": 9}]}
+        if "assignee:bot" in search and page == "1":
+            return {"items": [{"id": 3, "number": 9}, {"id": 4, "number": 11}]}
+        raise AssertionError(path)
 
 
 class LabelTracker(GitHubIssueTracker):
@@ -437,6 +495,28 @@ class GitHubSafetyTests(unittest.TestCase):
             ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=2"),
             tracker.requests,
         )
+
+    def test_list_actionable_paginates_agent_ready_label_fallback(self) -> None:
+        tracker = ActionableLabelTracker()
+
+        numbers = tracker.list_actionable("owner/repo")
+
+        self.assertEqual(numbers, [7, 9])
+        self.assertIn(
+            ("GET", "/repos/owner/repo/issues?state=open&labels=agent-ready&per_page=100&page=2"),
+            tracker.requests,
+        )
+
+    def test_list_actionable_paginates_mentions_and_assignments(self) -> None:
+        tracker = ActionableSearchTracker()
+
+        numbers = tracker.list_actionable("owner/repo")
+
+        self.assertEqual(numbers, [7, 9, 11])
+        self.assertTrue(
+            any("mentions%3Abot" in path and "page=2" in path for _, path in tracker.requests)
+        )
+        self.assertTrue(any("assignee%3Abot" in path for _, path in tracker.requests))
 
     def test_set_label_creates_missing_repo_label_then_retries(self) -> None:
         tracker = LabelTracker()

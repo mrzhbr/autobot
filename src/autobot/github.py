@@ -27,14 +27,15 @@ class GitHubIssueTracker:
 
     def list_actionable(self, repo: str) -> list[int]:
         if not self.agent_login:
-            issues = self._request("GET", f"/repos/{repo}/issues?state=open&labels=agent-ready")
+            issues = self._request_all_list_pages(
+                f"/repos/{repo}/issues?state=open&labels=agent-ready"
+            )
             return [int(item["number"]) for item in issues if "pull_request" not in item]
 
         numbers: set[int] = set()
         for qualifier in (f"mentions:{self.agent_login}", f"assignee:{self.agent_login}"):
             query = urllib.parse.quote(f"repo:{repo} is:issue is:open {qualifier}")
-            data = self._request("GET", f"/search/issues?q={query}")
-            for item in data.get("items", []):
+            for item in self._request_all_search_items(f"/search/issues?q={query}"):
                 if "pull_request" not in item:
                     numbers.add(int(item["number"]))
         return sorted(numbers)
@@ -73,6 +74,41 @@ class GitHubIssueTracker:
         if not isinstance(last, list):
             raise GitHubError(f"GitHub pagination expected a list for {path}")
         return _dedupe_by_id([*first, *last])
+
+    def _request_all_list_pages(self, path: str) -> list[Any]:
+        items: list[Any] = []
+        for page in self._page_numbers():
+            data = self._request("GET", _page_path(path, page))
+            if not isinstance(data, list):
+                raise GitHubError(f"GitHub pagination expected a list for {path}")
+            items.extend(data)
+            if self._last_page_reached(page, len(data)):
+                break
+        return _dedupe_by_id(items)
+
+    def _request_all_search_items(self, path: str) -> list[Any]:
+        items: list[Any] = []
+        for page in self._page_numbers():
+            data = self._request("GET", _page_path(path, page))
+            page_items = data.get("items", []) if isinstance(data, dict) else None
+            if not isinstance(page_items, list):
+                raise GitHubError(f"GitHub search pagination expected items for {path}")
+            items.extend(page_items)
+            if self._last_page_reached(page, len(page_items)):
+                break
+        return _dedupe_by_id(items)
+
+    def _page_numbers(self):
+        page = 1
+        while True:
+            yield page
+            page += 1
+
+    def _last_page_reached(self, page: int, count: int) -> bool:
+        last_page = _last_link_page(self._last_response_headers.get("Link", ""))
+        if last_page is not None:
+            return page >= last_page
+        return count < 100
 
     def comment(self, repo: str, issue_number: int, text: str) -> int:
         data = self._request(
@@ -134,6 +170,11 @@ def _last_link_page(link: str) -> int | None:
         page = urllib.parse.parse_qs(query).get("page", [None])[0]
         return int(page) if page else None
     return None
+
+
+def _page_path(path: str, page: int) -> str:
+    separator = "&" if "?" in path else "?"
+    return f"{path}{separator}per_page=100&page={page}"
 
 
 def _dedupe_by_id(items: list[Any]) -> list[Any]:
