@@ -67,6 +67,12 @@ class SupportTests(unittest.TestCase):
 
         self.assertEqual(config.review_models, ["model-a", "model-b"])
 
+    def test_config_defaults_sandbox_network_to_none(self) -> None:
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", {}, clear=True):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.sandbox_network, "none")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,7 +46,23 @@ class DoctorTests(unittest.TestCase):
             self.assertTrue(doctor_ok(checks))
             self.assertEqual(by_name["github token"].status, "skip")
             self.assertEqual(by_name["llm key"].status, "skip")
+            self.assertEqual(by_name["sandbox network"].status, "skip")
             self.assertEqual(by_name["issue readable"].status, "skip")
+
+    def test_live_doctor_warns_when_sandbox_network_allows_egress(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "SANDBOX_NETWORK": "bridge",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["sandbox network"].status, "warn")
+            self.assertIn("egress", by_name["sandbox network"].message)
 
     def test_issue_readability_uses_tracker_when_requested(self) -> None:
         with (

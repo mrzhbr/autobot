@@ -37,6 +37,7 @@ def run_doctor(
         _model_check("implement model", config.implement_model),
         _model_check("review model", config.review_model),
         _sandbox_image_check(config),
+        _sandbox_network_check(config),
     ]
     checks.append(_issue_check(config, repo, issue, network, tracker_factory))
     return checks
@@ -102,6 +103,18 @@ def _sandbox_image_check(config: Config) -> CheckResult:
     if config.sandbox_image:
         return CheckResult("sandbox image", "pass", config.sandbox_image)
     return CheckResult("sandbox image", "fail", "SANDBOX_IMAGE must not be empty")
+
+
+def _sandbox_network_check(config: Config) -> CheckResult:
+    if config.dry_run:
+        return CheckResult("sandbox network", "skip", "dry-run does not start Docker")
+    if config.sandbox_network == "none":
+        return CheckResult("sandbox network", "pass", "none")
+    return CheckResult(
+        "sandbox network",
+        "warn",
+        f"{config.sandbox_network} allows container egress; use only when setup/tests need it",
+    )
 
 
 def _issue_check(

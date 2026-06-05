@@ -12,7 +12,7 @@ from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.models import Issue, IssueRecord, IssueState, utc_now
 from autobot.pr import build_pr_body
-from autobot.resume import resume_after_comment_id
+from autobot.resume import PausedForHuman, resume_after_comment_id
 from autobot.review import ReviewerPanel, format_blockers
 from autobot.sandbox import DockerSandbox
 from autobot.scanner import find_secret_like_values
@@ -31,10 +31,6 @@ class ProcessResult:
     review_rounds: int
     files_touched: list[str]
     blocked_on: str | None
-
-
-class PausedForHuman(RuntimeError):
-    pass
 
 
 class IssueProcessor:
@@ -229,6 +225,7 @@ class IssueProcessor:
             repo_dir,
             self.config.sandbox_image,
             self.config.sandbox_setup_command,
+            self.config.sandbox_network,
         )
         if not self.config.dry_run:
             self.tracker.set_label(issue.repo, issue.number, "agent-working")

@@ -19,6 +19,7 @@ class Config:
     review_model: str
     review_models: list[str]
     sandbox_image: str
+    sandbox_network: str
     sandbox_setup_command: str | None
     default_test_command: str | None
     max_review_rounds: int
@@ -55,6 +56,7 @@ class Config:
             review_model=os.getenv("REVIEW_MODEL", model),
             review_models=_model_list(os.getenv("REVIEW_MODELS"), os.getenv("REVIEW_MODEL", model)),
             sandbox_image=os.getenv("SANDBOX_IMAGE", "python:3.12-slim"),
+            sandbox_network=os.getenv("SANDBOX_NETWORK", "none"),
             sandbox_setup_command=os.getenv("SANDBOX_SETUP_COMMAND"),
             default_test_command=os.getenv("AUTO_TEST_COMMAND"),
             max_review_rounds=int(os.getenv("MAX_REVIEW_ROUNDS", "3")),

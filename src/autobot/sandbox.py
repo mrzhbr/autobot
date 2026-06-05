@@ -18,7 +18,7 @@ class DockerSandbox:
         repo_dir: Path,
         image: str,
         setup_command: str | None = None,
-        network: str = "bridge",
+        network: str = "none",
     ) -> None:
         self.repo_dir = repo_dir
         self.image = image
