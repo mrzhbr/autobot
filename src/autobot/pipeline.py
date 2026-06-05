@@ -6,20 +6,20 @@ from pathlib import Path
 from autobot import resume
 from autobot import sandbox as sandbox_ops
 from autobot.adapters import LLM, ChatChannel, GitHost, IssueTracker
-from autobot.audit import AuditLog, record_best_effort
+from autobot.audit import AuditLog
 from autobot.config import Config
 from autobot.context import gather_context
 from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.labels import set_issue_label
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
-from autobot.pr import build_pr_body
+from autobot.pr_flow import finalize_draft_pr
 from autobot.result import finish_process
 from autobot.review import ReviewerPanel, format_blockers
 from autobot.scanner import ensure_no_secret_like_values, redact_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import detect_verification_commands, merge_verification_commands
-from autobot.workspace import branch_name, changed_files, prepare_dry_run_repo, repo_work_dir
+from autobot.workspace import branch_name, prepare_dry_run_repo, repo_work_dir
 
 
 class IssueProcessor:
@@ -336,36 +336,18 @@ class IssueProcessor:
             record.cost = ledger.to_dict()
             self.store.upsert(record)
             return "dry-run://draft-pr"
-        committed = self.git_host.commit_all(repo_dir, f"feat: implement issue #{issue.number}")
-        if not committed:
-            raise RuntimeError("no changes to commit")
-        branch = record.branch or branch_name(issue)
-        self.git_host.push(issue.repo, repo_dir, branch)
-        record_best_effort(self.audit, "push", issue.repo, issue.number, {"branch": branch}, record)
-        ci_status = self.git_host.ci_status(issue.repo, branch)
-        record.conversation["ci_status"] = ci_status
-        pr_url = self.git_host.open_draft_pr(
-            issue.repo,
-            branch,
-            f"Draft: {issue.title}",
-            build_pr_body(issue, record, ledger, verification_commands, test_output, ci_status),
-        )
-        record.conversation["pr_url"] = pr_url
-        record.pr_url = pr_url
-        self.store.upsert(record)
-        record_best_effort(
-            self.audit,
-            "draft_pr",
-            issue.repo,
-            issue.number,
-            {"url": pr_url, "branch": branch},
+        return finalize_draft_pr(
+            issue,
             record,
+            ledger,
+            repo_dir,
+            verification_commands,
+            test_output,
+            self.git_host,
+            self.tracker,
+            self.audit,
+            self.store,
         )
-        set_issue_label(self.tracker, self.audit, record, issue, "agent-pr-open")
-        record.files_touched = changed_files(repo_dir)
-        record.transition(IssueState.PR_OPEN)
-        self.store.upsert(record)
-        return pr_url
 
     def _pause_if_budget_hit(
         self,
