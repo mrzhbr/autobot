@@ -303,6 +303,10 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(second.state, IssueState.PR_OPEN)
             self.assertEqual(second.pr_url, "dry-run://draft-pr")
             self.assertEqual(second.files_touched, ["tests/test_issue_1.py", "README.md"])
+            self.assertEqual(
+                second.verification_commands,
+                ["python -m pytest", "true", "python -m unittest discover -s tests"],
+            )
             self.assertTrue(second.branch.startswith("autobot/issue-1-"))
             self.assertEqual(second.review_rounds, 1)
             self.assertEqual(llm.test_author_calls, 1)

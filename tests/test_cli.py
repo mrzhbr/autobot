@@ -32,6 +32,7 @@ class FakeWatchProcessor:
             branch=f"autobot/issue-{issue_number}",
             review_rounds=1,
             files_touched=["README.md"],
+            verification_commands=["python -m pytest"],
             blocked_on=None,
         )
 
@@ -66,6 +67,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(processor.calls, [("owner/repo", 2), ("owner/repo", 3)])
         self.assertEqual([line["issue"] for line in lines], [2, 3])
         self.assertTrue(all(line["state"] == "pr_open" for line in lines))
+        self.assertTrue(
+            all(line["verification_commands"] == ["python -m pytest"] for line in lines)
+        )
 
     def test_watch_once_reports_idle_when_no_actionable_issues(self) -> None:
         tracker = FakeWatchTracker([])

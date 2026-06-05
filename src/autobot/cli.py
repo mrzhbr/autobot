@@ -92,6 +92,7 @@ def _summary(repo: str, issue: int, result) -> dict:
         "blocked_on": result.blocked_on,
         "review_rounds": result.review_rounds,
         "files_touched": result.files_touched,
+        "verification_commands": result.verification_commands,
         "cost": result.cost,
     }
 

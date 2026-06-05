@@ -31,5 +31,6 @@ def finish_process(
         branch=record.branch,
         review_rounds=record.review_rounds,
         files_touched=record.files_touched,
+        verification_commands=list(record.plan.get("verification_commands") or []),
         blocked_on=record.blocked_on,
     )

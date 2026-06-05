@@ -111,6 +111,7 @@ class ProcessResult:
     branch: str | None
     review_rounds: int
     files_touched: list[str]
+    verification_commands: list[str]
     blocked_on: str | None
 
 
