@@ -32,6 +32,7 @@ export LLM_PROVIDER=openai
 export TRIAGE_MODEL=gpt-4.1
 export IMPLEMENT_MODEL=gpt-4.1
 export REVIEW_MODEL=gpt-4.1
+export REVIEW_MODELS=gpt-4.1,claude-sonnet-4-20250514
 ```
 
 Anthropic can be used instead:
@@ -121,6 +122,8 @@ Implemented defaults:
 - OpenAI or Anthropic HTTP calls for `LLM`
 
 Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.py`.
+
+Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model. If unset, all reviewers use `REVIEW_MODEL`.
 
 ## Safety
 

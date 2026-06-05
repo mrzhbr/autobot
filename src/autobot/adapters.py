@@ -69,5 +69,11 @@ class LLM(Protocol):
     ) -> ImplementationPlan:
         """Return a concrete plan, full-file changes, and test commands."""
 
-    def review(self, lens: str, issue: Issue, diff: str) -> ReviewReport:
+    def review(
+        self,
+        lens: str,
+        issue: Issue,
+        diff: str,
+        model: str | None = None,
+    ) -> ReviewReport:
         """Review a diff through one review lens."""

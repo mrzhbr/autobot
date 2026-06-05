@@ -79,8 +79,14 @@ class SequencedLLM:
             test_commands=["true"],
         )
 
-    def review(self, lens: str, issue: Issue, diff: str) -> ReviewReport:
-        return ReviewReport(lens, [])
+    def review(
+        self,
+        lens: str,
+        issue: Issue,
+        diff: str,
+        model: str | None = None,
+    ) -> ReviewReport:
+        return ReviewReport(lens, [], Usage("review", model or "default-review", 0, 0, 0))
 
 
 class BudgetLLM(SequencedLLM):

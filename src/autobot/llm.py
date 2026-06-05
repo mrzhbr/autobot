@@ -54,8 +54,15 @@ class MockLLM:
             test_commands=["python -m unittest discover -s tests || true"],
         )
 
-    def review(self, lens: str, issue: Issue, diff: str) -> ReviewReport:
-        return ReviewReport(lens=lens, findings=[])
+    def review(
+        self,
+        lens: str,
+        issue: Issue,
+        diff: str,
+        model: str | None = None,
+    ) -> ReviewReport:
+        usage = Usage("review", model or "mock-review", 0, 0, 0)
+        return ReviewReport(lens=lens, findings=[], usage=usage)
 
 
 class HttpLLM:
@@ -120,14 +127,21 @@ class HttpLLM:
             usage=usage,
         )
 
-    def review(self, lens: str, issue: Issue, diff: str) -> ReviewReport:
+    def review(
+        self,
+        lens: str,
+        issue: Issue,
+        diff: str,
+        model: str | None = None,
+    ) -> ReviewReport:
+        model = model or self.config.review_model
         prompt = (
             f"Review this diff with the lens: {lens}. Return strict JSON with key findings. "
             "Each finding has severity, file, line, message, blocking boolean. "
             "Blocking means the PR should not be opened until fixed.\n\n"
             f"Issue: {issue.title}\n\n{issue.body}\n\nDiff:\n{diff[:30000]}"
         )
-        data, usage = self._json_call("review", self.config.review_model, prompt)
+        data, usage = self._json_call("review", model, prompt)
         from autobot.schemas import ReviewPayload
 
         payload = ReviewPayload.model_validate(data)

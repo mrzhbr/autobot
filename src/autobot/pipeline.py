@@ -257,7 +257,7 @@ class IssueProcessor:
 
         record.transition(IssueState.REVIEW_LOOP)
         self.store.upsert(record)
-        panel = ReviewerPanel(self.llm)
+        panel = ReviewerPanel(self.llm, models=self.config.review_models)
         for round_number in range(1, self.config.max_review_rounds + 1):
             record.review_rounds = round_number
             diff = self.git_host.current_diff(repo_dir)

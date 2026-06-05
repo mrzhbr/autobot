@@ -21,19 +21,31 @@ class ReviewOutcome:
 
 
 class ReviewerPanel:
-    def __init__(self, llm: LLM, lenses: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        lenses: list[str] | None = None,
+        models: list[str] | None = None,
+    ) -> None:
         self.llm = llm
         self.lenses = lenses or REVIEW_LENSES
+        self.models = models or []
 
     def review(self, issue: Issue, diff: str, ledger: CostLedger) -> ReviewOutcome:
         reports: list[ReviewReport] = []
         blockers: list[ReviewFinding] = []
-        for lens in self.lenses:
-            report = self.llm.review(lens, issue, diff)
+        for index, lens in enumerate(self.lenses):
+            model = self._model_for(index)
+            report = self.llm.review(lens, issue, diff, model=model)
             ledger.add(report.usage)
             reports.append(report)
             blockers.extend(finding for finding in report.findings if finding.blocking)
         return ReviewOutcome(reports=reports, blocking_findings=blockers)
+
+    def _model_for(self, index: int) -> str | None:
+        if not self.models:
+            return None
+        return self.models[index % len(self.models)]
 
 
 def format_blockers(findings: list[ReviewFinding]) -> list[str]:

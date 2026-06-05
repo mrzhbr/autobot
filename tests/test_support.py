@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+from autobot.config import Config
 from autobot.cost import CostLedger
 from autobot.models import Usage
 from autobot.scanner import find_secret_like_values
@@ -55,6 +57,15 @@ class SupportTests(unittest.TestCase):
             self.assertEqual(commands.tests, ["npm test"])
             self.assertEqual(commands.lint, ["npm run lint"])
             self.assertEqual(commands.types, ["npm run typecheck"])
+
+    def test_config_parses_review_model_list(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"REVIEW_MODELS": "model-a, model-b"}, clear=True),
+        ):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.review_models, ["model-a", "model-b"])
 
 
 if __name__ == "__main__":
