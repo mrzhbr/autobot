@@ -143,7 +143,7 @@ class IssueProcessor:
             message = redact_secret_like_values(str(exc))
             record.transition(IssueState.ABANDONED)
             record.blocked_on = message
-            self.store.upsert(record)
+            finish_process(self.store, record, ledger, message, None, started)
             raise RuntimeError(message) from exc
         return finish_process(
             self.store, record, ledger, "opened draft pull request", pr_url, started

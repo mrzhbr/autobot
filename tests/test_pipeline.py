@@ -156,6 +156,26 @@ class BudgetLLM(SequencedLLM):
         )
 
 
+class CostedReadyLLM(SequencedLLM):
+    def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
+        return TriageDecision(True, [], "Ready.", Usage("triage", "test", 3, 2, 0.01))
+
+    def write_tests(self, issue: Issue, context: list[ContextFile]) -> ImplementationPlan:
+        return replace(
+            super().write_tests(issue, context),
+            usage=Usage("test", "test", 5, 3, 0.02),
+        )
+
+    def implement(
+        self,
+        issue: Issue,
+        context: list[ContextFile],
+        review_findings: list[str] | None = None,
+    ) -> ImplementationPlan:
+        plan = super().implement(issue, context, review_findings)
+        return replace(plan, usage=Usage("implement", "test", 7, 4, 0.03))
+
+
 class AlwaysNotReadyLLM(SequencedLLM):
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
         self.triage_calls += 1
@@ -432,7 +452,7 @@ class PipelineTests(unittest.TestCase):
                 tracker=tracker,
                 git_host=SecretFailGitHost(token),
                 chat=IssueCommentChat(tracker),
-                llm=MockLLM(),
+                llm=CostedReadyLLM(),
                 audit=AuditLog(config.audit_path),
             )
 
@@ -445,6 +465,13 @@ class PipelineTests(unittest.TestCase):
             self.assertNotIn(token, str(raised.exception))
             self.assertNotIn(token, loaded.blocked_on or "")
             self.assertIn("[redacted-secret]", loaded.blocked_on or "")
+            self.assertEqual(loaded.cost["total_tokens"], 24)
+            self.assertEqual(
+                [call["role"] for call in loaded.cost["calls"]],
+                ["triage", "test", "implement"],
+            )
+            self.assertIsNotNone(loaded.cost["finished_at"])
+            self.assertIn("wall_seconds", loaded.cost)
 
     def test_budget_hit_pauses_in_waiting_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
