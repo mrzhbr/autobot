@@ -168,6 +168,16 @@ class LinkedIssueTracker(PagedIssueTracker):
                     "user": {"login": "alice"},
                 }
             ]
+        if path.endswith("comments?per_page=100&page=8"):
+            self.requests.append((method, path))
+            return [
+                {
+                    "id": 801,
+                    "body": "Recent human reply before the last page.",
+                    "created_at": "2026-06-05T00:08:00Z",
+                    "user": {"login": "alice"},
+                }
+            ]
         return super()._request(method, path, body)
 
 
@@ -684,7 +694,13 @@ class GitHubSafetyTests(unittest.TestCase):
 
         issue = tracker.get("owner/repo", 7)
 
+        bodies = [comment.body for comment in issue.comments]
+        self.assertIn("Recent human reply before the last page.", bodies)
         self.assertEqual(issue.comments[-1].body, "Latest human reply.")
+        self.assertIn(
+            ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=8"),
+            tracker.requests,
+        )
         self.assertIn(
             ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=9"),
             tracker.requests,

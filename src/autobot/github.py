@@ -70,10 +70,13 @@ class GitHubIssueTracker:
             page = 2
         if page is None or page == 1:
             return first
-        last = self._request("GET", f"{path}?per_page=100&page={page}")
-        if not isinstance(last, list):
-            raise GitHubError(f"GitHub pagination expected a list for {path}")
-        return _dedupe_by_id([*first, *last])
+        items = list(first)
+        for number in range(max(2, page - 1), page + 1):
+            page_items = self._request("GET", f"{path}?per_page=100&page={number}")
+            if not isinstance(page_items, list):
+                raise GitHubError(f"GitHub pagination expected a list for {path}")
+            items.extend(page_items)
+        return _dedupe_by_id(items)
 
     def _request_all_list_pages(self, path: str) -> list[Any]:
         items: list[Any] = []
