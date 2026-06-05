@@ -80,6 +80,26 @@ class LLMTests(unittest.TestCase):
         self.assertIn("Comments:\nalice: Use a dropdown, not radio buttons.", prompt)
         self.assertIn("Diff:\ndiff --git", prompt)
 
+    def test_prompt_comments_are_truncated(self) -> None:
+        llm = _llm()
+        body = "start " + ("x" * 2200) + " tail"
+        issue = Issue(
+            "owner/repo",
+            1,
+            "Add filter",
+            "Use a filter control.",
+            "alice",
+            [],
+            [IssueComment(7, "alice", body, "2026-06-05")],
+        )
+
+        llm.review("correctness", issue, "diff --git a/app.py b/app.py")
+
+        _, _, prompt = llm.calls[-1]
+        self.assertIn("start ", prompt)
+        self.assertIn("...[truncated]", prompt)
+        self.assertNotIn(" tail", prompt)
+
     def test_pricing_uses_role_specific_env_vars(self) -> None:
         with patch.dict(
             "os.environ",

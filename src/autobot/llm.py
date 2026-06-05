@@ -36,6 +36,8 @@ Engineering rules:
 - Avoid filler comments, dead code, speculative abstractions, and unrelated cleanup.
 """
 
+COMMENT_TEXT_LIMIT = 2000
+
 
 class MockLLM:
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
@@ -306,7 +308,16 @@ def _parse_json(text: str) -> dict[str, Any]:
 def _comments(issue: Issue) -> str:
     if not issue.comments:
         return "None"
-    return "\n\n".join(f"{comment.author}: {comment.body}" for comment in issue.comments[-12:])
+    return "\n\n".join(
+        f"{comment.author}: {_truncate(comment.body, COMMENT_TEXT_LIMIT)}"
+        for comment in issue.comments[-12:]
+    )
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
 
 
 def _optional_int(value: Any) -> int | None:
