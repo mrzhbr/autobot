@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
 from autobot.config import Config
-from autobot.llm import HttpLLM, _priced
+from autobot.llm import HttpLLM, LLMError, _parse_json, _post_json, _priced
 from autobot.models import ContextFile, Issue, Usage
 
 
@@ -82,6 +84,34 @@ class LLMTests(unittest.TestCase):
             clear=True,
         ):
             self.assertEqual(_priced("test", 2000, 500), 0.009)
+
+    def test_parse_json_redacts_non_json_model_text(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        with self.assertRaises(LLMError) as raised:
+            _parse_json(f"not json {token}")
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
+
+    def test_openai_http_errors_are_redacted(self) -> None:
+        token = "sk-" + ("A" * 40)
+        error = urllib.error.HTTPError(
+            "https://api.openai.com/v1/chat/completions",
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO(f'{{"error":"bad {token}"}}'.encode()),
+        )
+
+        with (
+            patch("autobot.llm.urllib.request.urlopen", side_effect=error),
+            self.assertRaises(LLMError) as raised,
+        ):
+            _post_json("https://api.openai.com/v1/chat/completions", token, {"model": "m"})
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
 
 
 def _llm() -> CapturingLLM:

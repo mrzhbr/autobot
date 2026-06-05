@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -18,6 +19,7 @@ from autobot.models import (
     TriageDecision,
     Usage,
 )
+from autobot.scanner import redact_secret_like_values
 
 
 class LLMError(RuntimeError):
@@ -251,8 +253,7 @@ class HttpLLM:
                 "messages": [{"role": "user", "content": prompt}],
             }
         ).encode("utf-8")
-        with urllib.request.urlopen(request, data=body, timeout=90) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        data = _read_http_json(request, "Anthropic", body)
         content = "".join(part.get("text", "") for part in data.get("content", []))
         usage = data.get("usage", {})
         return _parse_json(content), Usage(
@@ -274,8 +275,20 @@ def _post_json(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
     request = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
     request.add_header("Authorization", f"Bearer {token}")
     request.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(request, timeout=90) as response:
-        return json.loads(response.read().decode("utf-8"))
+    return _read_http_json(request, "OpenAI")
+
+
+def _read_http_json(request: urllib.request.Request, provider: str, data: bytes | None = None):
+    try:
+        with urllib.request.urlopen(request, data=data, timeout=90) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        payload = exc.read().decode("utf-8", errors="replace")
+        message = redact_secret_like_values(f"{provider} request failed: {exc.code} {payload}")
+        raise LLMError(message) from exc
+    except urllib.error.URLError as exc:
+        message = redact_secret_like_values(f"{provider} request failed: {exc}")
+        raise LLMError(message) from exc
 
 
 def _parse_json(text: str) -> dict[str, Any]:
@@ -284,7 +297,8 @@ def _parse_json(text: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         match = re.search(r"\{.*\}", text, re.S)
         if not match:
-            raise LLMError(f"model did not return JSON: {text[:200]}") from exc
+            snippet = redact_secret_like_values(text[:200])
+            raise LLMError(f"model did not return JSON: {snippet}") from exc
         return json.loads(match.group(0))
 
 
