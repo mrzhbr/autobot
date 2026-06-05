@@ -15,7 +15,7 @@ from autobot.labels import set_issue_label
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr_flow import finalize_draft_pr
 from autobot.result import abandon_process, finish_process
-from autobot.review import ReviewerPanel, format_blockers
+from autobot.review import ReviewerPanel, format_blockers, review_round_artifact
 from autobot.scanner import ensure_no_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import detect_verification_commands, merge_verification_commands
@@ -306,8 +306,11 @@ class IssueProcessor:
             diff = self.git_host.current_diff(repo_dir)
             ensure_no_secret_like_values(diff, "diff")
             outcome = panel.review(issue, diff, ledger)
-            self._pause_if_budget_hit(issue, record, ledger, "review")
+            record.conversation.setdefault("review_reports", []).append(
+                review_round_artifact(round_number, outcome)
+            )
             self.store.upsert(record)
+            self._pause_if_budget_hit(issue, record, ledger, "review")
             if not outcome.blocking_findings:
                 break
             if round_number >= self.config.max_review_rounds:

@@ -489,6 +489,14 @@ class PipelineTests(unittest.TestCase):
                     "python -m unittest discover -s tests",
                 ],
             )
+            review_reports = loaded.conversation["review_reports"]
+            self.assertEqual([round_info["round"] for round_info in review_reports], [1, 2])
+            self.assertEqual(len(review_reports[0]["reports"]), 4)
+            self.assertEqual(
+                review_reports[0]["blocking_findings"][0]["message"],
+                "Needs a follow-up fix.",
+            )
+            self.assertEqual(review_reports[1]["blocking_findings"], [])
 
     def test_live_pipeline_uses_detected_sandbox_setup_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

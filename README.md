@@ -164,6 +164,10 @@ Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across m
 the prototype stopping rule that a draft PR cannot open without review and that
 the review loop stops after at most three rounds.
 
+Each review round stores its structured reviewer reports and blocking findings in
+the issue record so the durable state shows what the reviewers accepted or asked
+the implementer to fix.
+
 ## Safety
 
 The prototype enforces these guardrails:

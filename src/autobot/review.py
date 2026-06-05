@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from autobot.adapters import LLM
 from autobot.cost import CostLedger
@@ -56,3 +56,11 @@ def format_blockers(findings: list[ReviewFinding]) -> list[str]:
             location += f":{finding.line}"
         lines.append(f"[{finding.severity}] {location} {finding.message}".strip())
     return lines
+
+
+def review_round_artifact(round_number: int, outcome: ReviewOutcome) -> dict:
+    return {
+        "round": round_number,
+        "reports": [asdict(report) for report in outcome.reports],
+        "blocking_findings": [asdict(finding) for finding in outcome.blocking_findings],
+    }
