@@ -148,7 +148,7 @@ The prototype enforces these guardrails:
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
 - Scans the final diff for common secret-like values, including raw provider tokens, before commit and PR creation.
-- Redacts token-like values from CLI, GitHub command, and abandoned-state failure messages.
+- Redacts token-like values from CLI, GitHub command, abandoned-state, and verification-output messages.
 - Caps issue comments per processed issue with `COMMENT_LIMIT_PER_RUN`.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.
 - Creates those GitHub labels on first use if the target repo does not already have them, tolerating concurrent creation.

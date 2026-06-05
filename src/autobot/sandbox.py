@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from autobot.models import FileChange
+from autobot.scanner import redact_secret_like_values
 
 
 class SandboxError(RuntimeError):
@@ -144,9 +145,9 @@ def run_verification(sandbox: DockerSandbox, commands: list[str], dry_run: bool)
     output: list[str] = []
     for command in commands:
         if dry_run:
-            output.append(f"$ {command}\ndry-run skipped")
+            output.append(_verification_block(command, "dry-run skipped"))
         else:
-            output.append(f"$ {command}\n{sandbox.run(command)}")
+            output.append(_verification_block(command, sandbox.run(command)))
     return "\n\n".join(output)
 
 
@@ -159,14 +160,18 @@ def run_verification_allow_failure(
     ok = True
     for command in commands:
         if dry_run:
-            output.append(f"$ {command}\ndry-run skipped")
+            output.append(_verification_block(command, "dry-run skipped"))
             continue
         try:
-            output.append(f"$ {command}\n{sandbox.run(command)}")
+            output.append(_verification_block(command, sandbox.run(command)))
         except SandboxError as exc:
             ok = False
-            output.append(f"$ {command}\n{exc}")
+            output.append(_verification_block(command, str(exc)))
     return {"ok": ok, "output": "\n\n".join(output)}
+
+
+def _verification_block(command: str, text: str) -> str:
+    return redact_secret_like_values(f"$ {command}\n{text}")
 
 
 def _has_python_setup(repo_dir: Path) -> bool:

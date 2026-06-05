@@ -8,7 +8,7 @@ from unittest.mock import patch
 from autobot.config import Config
 from autobot.cost import CostLedger
 from autobot.models import Usage
-from autobot.sandbox import LocalSandbox, run_verification_allow_failure
+from autobot.sandbox import LocalSandbox, run_verification, run_verification_allow_failure
 from autobot.scanner import find_secret_like_values, redact_secret_like_values
 from autobot.tests import (
     VerificationCommands,
@@ -111,6 +111,31 @@ class SupportTests(unittest.TestCase):
 
         self.assertEqual(result["ok"], False)
         self.assertIn("$ false", result["output"])
+
+    def test_verification_output_redacts_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        with TemporaryDirectory() as tmp:
+            result = run_verification(
+                LocalSandbox(Path(tmp)),
+                [f"printf '%s' '{token}'"],
+                False,
+            )
+
+        self.assertNotIn(token, result)
+        self.assertIn("[redacted-secret]", result)
+
+    def test_failing_verification_output_redacts_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        with TemporaryDirectory() as tmp:
+            result = run_verification_allow_failure(
+                LocalSandbox(Path(tmp)),
+                [f"printf '%s' '{token}' && false"],
+                False,
+            )
+
+        self.assertEqual(result["ok"], False)
+        self.assertNotIn(token, result["output"])
+        self.assertIn("[redacted-secret]", result["output"])
 
     def test_config_parses_review_model_list(self) -> None:
         with (
