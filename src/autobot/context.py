@@ -83,7 +83,8 @@ def _priority_files(repo_dir: Path) -> list[Path]:
 
 
 def _keywords(issue: Issue) -> list[str]:
-    text = f"{issue.title} {issue.body}".lower()
+    comments = " ".join(comment.body for comment in issue.comments)
+    text = f"{issue.title} {issue.body} {comments}".lower()
     words = re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", text)
     stop = {"the", "and", "for", "with", "from", "this", "that", "add", "fix", "issue"}
     return [word for word in dict.fromkeys(words) if word not in stop][:8]
