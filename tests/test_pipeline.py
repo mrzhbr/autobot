@@ -1388,14 +1388,16 @@ class PipelineTests(unittest.TestCase):
                 audit=AuditLog(config.audit_path),
             )
 
-            with self.assertRaisesRegex(RuntimeError, "comment limit reached"):
-                processor.process("owner/repo", 1)
+            result = processor.process("owner/repo", 1)
 
+            self.assertEqual(result.state, IssueState.WAITING)
+            self.assertEqual(result.message, "waiting for outbound comment capacity")
             self.assertEqual(tracker.comments, [])
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
-            self.assertEqual(loaded.state, IssueState.ABANDONED)
-            self.assertIn("comment limit reached", loaded.blocked_on or "")
+            self.assertEqual(loaded.state, IssueState.WAITING)
+            self.assertEqual(loaded.blocked_on, "comment_limit")
+            self.assertEqual(loaded.conversation["comment_limit_pause"]["kind"], "guardrail")
 
     def test_comment_limit_blocks_clarification_comment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1416,14 +1418,57 @@ class PipelineTests(unittest.TestCase):
                 audit=AuditLog(config.audit_path),
             )
 
-            with self.assertRaisesRegex(RuntimeError, "comment limit reached"):
-                processor.process("owner/repo", 1)
+            result = processor.process("owner/repo", 1)
 
+            self.assertEqual(result.state, IssueState.WAITING)
+            self.assertEqual(result.message, "waiting for outbound comment capacity")
             self.assertEqual(tracker.comments, [])
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
-            self.assertEqual(loaded.state, IssueState.ABANDONED)
-            self.assertIn("comment limit reached", loaded.blocked_on or "")
+            self.assertEqual(loaded.state, IssueState.WAITING)
+            self.assertEqual(loaded.blocked_on, "comment_limit")
+            self.assertEqual(loaded.conversation["comment_limit_pause"]["kind"], "clarification")
+
+    def test_comment_limit_pause_posts_saved_clarification_after_cap_increases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            limited = replace(
+                Config.from_env(root=root, dry_run=False, mock_llm=True),
+                comment_limit=0,
+            )
+            tracker = FakeTracker()
+            store = StateStore(limited.db_path)
+            first_processor = IssueProcessor(
+                config=limited,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=SequencedLLM(),
+                audit=AuditLog(limited.audit_path),
+            )
+
+            first = first_processor.process("owner/repo", 1)
+            raised_limit = replace(limited, comment_limit=1)
+            second = IssueProcessor(
+                config=raised_limit,
+                store=StateStore(raised_limit.db_path),
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=SequencedLLM(),
+                audit=AuditLog(raised_limit.audit_path),
+            ).process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(second.message, "posted clarification and entered waiting")
+            self.assertEqual(len(tracker.comments), 1)
+            loaded = StateStore(raised_limit.db_path).get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.blocked_on, "clarification")
+            self.assertEqual(loaded.conversation["asked_comment_id"], 1)
+            self.assertNotIn("comment_limit_pause", loaded.conversation)
 
     def test_comment_limit_resets_for_each_processed_issue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

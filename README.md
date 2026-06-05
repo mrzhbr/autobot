@@ -179,7 +179,8 @@ the review loop stops after at most three rounds.
 
 `MAX_ISSUE_TOKENS`, `MAX_ISSUE_DOLLARS`, and `COMMENT_LIMIT_PER_RUN` must be
 nonnegative. A comment limit of `0` is allowed and prevents outbound issue
-comments for that run.
+comments for that run. Clarification and guardrail questions that hit the cap are
+stored in `waiting` and posted on a later run after the cap is raised.
 
 Each review round stores its structured reviewer reports and blocking findings in
 the issue record so the durable state shows what the reviewers accepted or asked

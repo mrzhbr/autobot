@@ -72,6 +72,8 @@ class IssueProcessor:
         resumed = False
         previous_blocked_on = record.blocked_on
         if record.state == IssueState.WAITING:
+            if record.blocked_on == "comment_limit":
+                return self._resume_comment_limit_pause(issue, record, ledger, started)
             resumed, waiting_message = resume.resume_waiting(
                 record,
                 issue,
@@ -176,7 +178,15 @@ class IssueProcessor:
     ) -> ProcessResult:
         question = guardrail_question(topics)
         if self.comments_this_run >= self.config.comment_limit:
-            raise RuntimeError("comment limit reached before guardrail question could be posted")
+            return self._pause_for_comment_limit(
+                issue,
+                record,
+                ledger,
+                "guardrail",
+                [question],
+                started,
+                topics,
+            )
         if self.config.dry_run:
             comment_id = resume.latest_comment_id(issue)
         else:
@@ -215,7 +225,14 @@ class IssueProcessor:
         record.transition(IssueState.NEEDS_SPEC)
         self.store.upsert(record)
         if self.comments_this_run >= self.config.comment_limit:
-            raise RuntimeError("comment limit reached before clarification could be posted")
+            return self._pause_for_comment_limit(
+                issue,
+                record,
+                ledger,
+                "clarification",
+                questions[:3],
+                started,
+            )
         if self.config.dry_run:
             comment_id = resume.latest_comment_id(issue)
         else:
@@ -242,6 +259,67 @@ class IssueProcessor:
             ledger,
             "posted clarification and entered waiting",
             None,
+            started,
+        )
+
+    def _pause_for_comment_limit(
+        self,
+        issue: Issue,
+        record: IssueRecord,
+        ledger: CostLedger,
+        kind: str,
+        questions: list[str],
+        started: float,
+        topics: list[str] | None = None,
+    ) -> ProcessResult:
+        record.conversation["comment_limit_pause"] = {
+            "kind": kind,
+            "questions": questions,
+            "topics": topics or [],
+            "at": utc_now(),
+        }
+        record.conversation["resume_after_comment_id"] = resume.latest_comment_id(issue)
+        record.blocked_on = "comment_limit"
+        record.transition(IssueState.WAITING)
+        return finish_process(
+            self.store,
+            record,
+            ledger,
+            "waiting for outbound comment capacity",
+            None,
+            started,
+        )
+
+    def _resume_comment_limit_pause(
+        self,
+        issue: Issue,
+        record: IssueRecord,
+        ledger: CostLedger,
+        started: float,
+    ) -> ProcessResult:
+        if self.comments_this_run >= self.config.comment_limit:
+            return finish_process(
+                self.store,
+                record,
+                ledger,
+                "waiting for outbound comment capacity",
+                None,
+                started,
+            )
+        pause = record.conversation.pop("comment_limit_pause", {})
+        if pause.get("kind") == "guardrail":
+            return self._pause_for_guardrail(
+                issue,
+                record,
+                ledger,
+                list(pause.get("topics") or []),
+                started,
+            )
+        return self._ask_and_wait(
+            issue,
+            record,
+            ledger,
+            list(pause.get("questions") or []),
             started,
         )
 
