@@ -1211,14 +1211,14 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(second.message, "waiting for budget increase")
             self.assertEqual(second_llm.triage_calls, 0)
 
-    def test_existing_cost_budget_hit_pauses_before_clone_or_llm_work(self) -> None:
+    def test_existing_cost_budget_hit_pauses_before_issue_read_clone_or_llm_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = replace(
                 Config.from_env(root=root, dry_run=False, mock_llm=True),
                 max_issue_tokens=5,
             )
-            tracker = FakeTracker(body="Ready to implement.")
+            tracker = IssueReadFailTracker(body="Ready to implement.")
             store = StateStore(config.db_path)
             record = store.ensure("owner/repo", 1)
             record.transition(IssueState.SPEC_READY)
@@ -1255,6 +1255,45 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(loaded.blocked_on, "budget")
             self.assertEqual(loaded.conversation["budget_pause"]["phase"], "run start")
+
+    def test_budget_blocked_rerun_returns_before_issue_read_without_duplicate_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = replace(
+                Config.from_env(root=root, dry_run=False, mock_llm=True),
+                max_issue_tokens=5,
+            )
+            tracker = IssueReadFailTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            record = store.ensure("owner/repo", 1)
+            record.transition(IssueState.WAITING)
+            record.blocked_on = "budget"
+            record.cost = {
+                "calls": [
+                    {
+                        "role": "triage",
+                        "model": "test",
+                        "input_tokens": 5,
+                        "output_tokens": 0,
+                    }
+                ]
+            }
+            store.upsert(record)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=CloneFailGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=SequencedLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.WAITING)
+            self.assertEqual(result.message, "waiting for budget increase")
+            self.assertEqual(tracker.comments, [])
 
     def test_comment_limit_blocks_guardrail_comment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

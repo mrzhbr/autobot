@@ -53,6 +53,20 @@ class IssueProcessor:
         if record.state == IssueState.PR_OPEN:
             return terminal_process_result(record, "draft pull request already open")
 
+        if ledger.hit_budget(self.config.max_issue_tokens, self.config.max_issue_dollars):
+            if record.blocked_on == "budget":
+                return finish_process(
+                    self.store, record, ledger, "waiting for budget increase", None, started
+                )
+            issue_ref = Issue(repo, issue_number, "", "", "unknown", [])
+            try:
+                self._pause_if_budget_hit(issue_ref, record, ledger, "run start")
+            except resume.PausedForHuman as exc:
+                return finish_process(self.store, record, ledger, str(exc), None, started)
+            except Exception as exc:
+                message = abandon_process(self.store, record, ledger, exc, started)
+                raise RuntimeError(message) from exc
+
         issue = self.tracker.get(repo, issue_number)
 
         resumed = False
@@ -69,14 +83,6 @@ class IssueProcessor:
             if not resumed:
                 return finish_process(self.store, record, ledger, waiting_message, None, started)
             self.store.upsert(record)
-
-        try:
-            self._pause_if_budget_hit(issue, record, ledger, "run start")
-        except resume.PausedForHuman as exc:
-            return finish_process(self.store, record, ledger, str(exc), None, started)
-        except Exception as exc:
-            message = abandon_process(self.store, record, ledger, exc, started)
-            raise RuntimeError(message) from exc
 
         topics = detect_out_of_scope(issue)
         if resumed and topics and previous_blocked_on == "out_of_scope":
