@@ -4,6 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+OPENAI_DEFAULT_MODEL = "gpt-4.1"
+ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+
 
 @dataclass(frozen=True)
 class Config:
@@ -39,7 +42,8 @@ class Config:
         mock_llm: bool = False,
     ) -> Config:
         base = root / ".autobot"
-        model = os.getenv("MODEL", "gpt-4.1")
+        provider = os.getenv("LLM_PROVIDER")
+        model = os.getenv("MODEL") or _default_model(infer_llm_provider(provider))
         db_default = os.getenv("AUTOBOT_DB", str(base / "state.db"))
         audit_default = os.getenv("AUTOBOT_AUDIT_LOG", str(base / "audit.jsonl"))
         work_default = os.getenv("AUTOBOT_WORK_ROOT", str(base / "work"))
@@ -50,7 +54,7 @@ class Config:
             work_root=Path(work_root) if work_root else Path(work_default),
             github_token=os.getenv("GITHUB_TOKEN"),
             agent_login=os.getenv("AGENT_LOGIN") or os.getenv("GITHUB_ACTOR"),
-            llm_provider=os.getenv("LLM_PROVIDER"),
+            llm_provider=provider,
             triage_model=os.getenv("TRIAGE_MODEL", model),
             implement_model=os.getenv("IMPLEMENT_MODEL", model),
             review_model=os.getenv("REVIEW_MODEL", model),
@@ -66,6 +70,22 @@ class Config:
             dry_run=dry_run,
             mock_llm=mock_llm or os.getenv("AUTOBOT_MOCK_LLM") == "1",
         )
+
+
+def infer_llm_provider(configured: str | None = None) -> str | None:
+    if configured:
+        return configured
+    if os.getenv("OPENAI_API_KEY"):
+        return "openai"
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    return None
+
+
+def _default_model(provider: str | None) -> str:
+    if provider == "anthropic":
+        return ANTHROPIC_DEFAULT_MODEL
+    return OPENAI_DEFAULT_MODEL
 
 
 def _optional_int(value: str | None) -> int | None:

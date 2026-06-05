@@ -100,6 +100,15 @@ class LLMTests(unittest.TestCase):
         self.assertIn("...[truncated]", prompt)
         self.assertNotIn(" tail", prompt)
 
+    def test_http_llm_infers_anthropic_provider_from_only_anthropic_key(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "x"}, clear=True),
+        ):
+            llm = HttpLLM(Config.from_env(Path(tmp)))
+
+        self.assertEqual(llm.provider, "anthropic")
+
     def test_pricing_uses_role_specific_env_vars(self) -> None:
         with patch.dict(
             "os.environ",

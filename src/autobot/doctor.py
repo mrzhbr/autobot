@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from autobot.config import Config
+from autobot.config import Config, infer_llm_provider
 from autobot.github import GitHubIssueTracker
 from autobot.sandbox import SandboxError, ensure_no_secret_commands
 from autobot.scanner import redact_secret_like_values
@@ -113,7 +113,7 @@ def _agent_login_check(config: Config) -> CheckResult:
 def _llm_key_check(config: Config) -> CheckResult:
     if config.mock_llm or config.dry_run:
         return CheckResult("llm key", "skip", "mock or dry-run mode does not need an LLM key")
-    provider = config.llm_provider
+    provider = infer_llm_provider(config.llm_provider)
     if provider not in {None, "openai", "anthropic"}:
         return CheckResult("llm key", "fail", "LLM_PROVIDER must be openai or anthropic")
     if provider == "openai":

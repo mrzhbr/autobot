@@ -9,7 +9,7 @@ from pathlib import Path
 
 from autobot.audit import AuditLog
 from autobot.chat import IssueCommentChat
-from autobot.config import Config
+from autobot.config import Config, infer_llm_provider
 from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
 from autobot.llm import build_llm
@@ -131,15 +131,14 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
 def _ensure_live_llm_key(config: Config) -> None:
     if config.dry_run or config.mock_llm:
         return
-    if config.llm_provider not in {None, "openai", "anthropic"}:
+    provider = infer_llm_provider(config.llm_provider)
+    if provider not in {None, "openai", "anthropic"}:
         raise RuntimeError("LLM_PROVIDER must be openai or anthropic")
-    if config.llm_provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+    if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is required")
-    if config.llm_provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
+    if provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY is required")
-    if config.llm_provider not in {"openai", "anthropic"} and not (
-        os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-    ):
+    if provider is None:
         raise RuntimeError("OPENAI_API_KEY or ANTHROPIC_API_KEY is required")
 
 

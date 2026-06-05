@@ -108,6 +108,18 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["llm key"].status, "fail")
             self.assertIn("LLM_PROVIDER must be openai or anthropic", by_name["llm key"].message)
 
+    def test_live_doctor_uses_anthropic_default_model_for_anthropic_key(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "ANTHROPIC_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertTrue(doctor_ok(checks))
+            self.assertEqual(by_name["llm key"].message, "ANTHROPIC_API_KEY is set")
+            self.assertEqual(by_name["triage model"].message, "claude-sonnet-4-20250514")
+
     def test_live_doctor_warns_when_sandbox_network_allows_egress(self) -> None:
         env = {
             "GITHUB_TOKEN": "x",

@@ -231,6 +231,30 @@ class SupportTests(unittest.TestCase):
         ):
             Config.from_env(Path(tmp))
 
+    def test_config_defaults_to_anthropic_model_for_anthropic_key(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "x"}, clear=True),
+        ):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.triage_model, "claude-sonnet-4-20250514")
+        self.assertEqual(config.implement_model, "claude-sonnet-4-20250514")
+        self.assertEqual(config.review_models, ["claude-sonnet-4-20250514"])
+
+    def test_config_prefers_openai_defaults_when_both_llm_keys_exist(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "x", "ANTHROPIC_API_KEY": "x"},
+                clear=True,
+            ),
+        ):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.triage_model, "gpt-4.1")
+
 
 if __name__ == "__main__":
     unittest.main()

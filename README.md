@@ -36,6 +36,7 @@ export REVIEW_MODELS=gpt-4.1,claude-sonnet-4-20250514
 ```
 
 `LLM_PROVIDER` may be unset, `openai`, or `anthropic`; any other value fails preflight before processing an issue.
+When `MODEL` is unset, the default model follows the inferred provider: OpenAI uses `gpt-4.1`, Anthropic uses `claude-sonnet-4-20250514`. If both provider keys are present and `LLM_PROVIDER` is unset, OpenAI is selected.
 
 Anthropic can be used instead:
 

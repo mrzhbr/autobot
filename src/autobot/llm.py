@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from autobot.config import Config
+from autobot.config import Config, infer_llm_provider
 from autobot.context import format_context
 from autobot.models import (
     ContextFile,
@@ -96,10 +96,7 @@ class MockLLM:
 class HttpLLM:
     def __init__(self, config: Config) -> None:
         self.config = config
-        provider = config.llm_provider
-        if provider is None:
-            provider = "anthropic" if os.getenv("ANTHROPIC_API_KEY") else "openai"
-        self.provider = provider
+        self.provider = infer_llm_provider(config.llm_provider) or "openai"
 
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
         prompt = (
