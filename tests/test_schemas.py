@@ -41,6 +41,18 @@ class SchemaTests(unittest.TestCase):
                 }
             )
 
+    def test_implementation_rejects_empty_plan_after_trimming(self) -> None:
+        with self.assertRaises(ValidationError) as raised:
+            ImplementationPayload.model_validate(
+                {
+                    "plan": ["   "],
+                    "changes": [{"path": "README.md", "content": "# Demo\n"}],
+                    "test_commands": [],
+                }
+            )
+
+        self.assertIn("implementation plan must include", str(raised.exception))
+
     def test_implementation_rejects_secret_like_test_commands_without_echoing_input(self) -> None:
         token = "ghp_" + ("A" * 36)
 

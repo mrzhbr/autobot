@@ -60,6 +60,12 @@ class ImplementationPayload(StrictPayload):
             raise ValueError(f"secret-like values found in test commands: {count} finding(s)")
         return commands
 
+    @model_validator(mode="after")
+    def require_plan_steps(self) -> ImplementationPayload:
+        if not self.plan:
+            raise ValueError("implementation plan must include at least one non-empty step")
+        return self
+
 
 class ReviewFindingPayload(StrictPayload):
     severity: Literal["info", "low", "medium", "high", "critical"]
