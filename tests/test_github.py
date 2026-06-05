@@ -69,6 +69,38 @@ class PagedIssueTracker(GitHubIssueTracker):
         raise AssertionError(path)
 
 
+class LinkedIssueTracker(PagedIssueTracker):
+    def _request(self, method: str, path: str, body: dict | None = None):
+        if path.endswith("comments?per_page=100&page=1"):
+            self._last_response_headers = {
+                "Link": (
+                    "<https://api.github.com/repos/owner/repo/issues/7/comments"
+                    '?per_page=100&page=9>; rel="last"'
+                )
+            }
+            self.requests.append((method, path))
+            return [
+                {
+                    "id": index,
+                    "body": f"comment {index}",
+                    "created_at": "2026-06-05T00:00:00Z",
+                    "user": {"login": "alice"},
+                }
+                for index in range(1, 101)
+            ]
+        if path.endswith("comments?per_page=100&page=9"):
+            self.requests.append((method, path))
+            return [
+                {
+                    "id": 901,
+                    "body": "Latest human reply.",
+                    "created_at": "2026-06-05T00:09:00Z",
+                    "user": {"login": "alice"},
+                }
+            ]
+        return super()._request(method, path, body)
+
+
 class GitHubSafetyTests(unittest.TestCase):
     def setUp(self) -> None:
         RecordingTracker.requests = []
@@ -117,6 +149,21 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertEqual(len(issue.comments), 101)
         self.assertEqual(issue.comments[-1].body, "Use the compact option.")
         self.assertIn(
+            ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=2"),
+            tracker.requests,
+        )
+
+    def test_issue_get_uses_linked_last_comment_page(self) -> None:
+        tracker = LinkedIssueTracker()
+
+        issue = tracker.get("owner/repo", 7)
+
+        self.assertEqual(issue.comments[-1].body, "Latest human reply.")
+        self.assertIn(
+            ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=9"),
+            tracker.requests,
+        )
+        self.assertNotIn(
             ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=2"),
             tracker.requests,
         )

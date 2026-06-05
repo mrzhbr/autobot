@@ -60,11 +60,19 @@ class IssueProcessor:
         resumed = False
         previous_blocked_on = record.blocked_on
         if record.state == IssueState.WAITING:
-            resumed = self._resume_if_answered(record, issue)
+            resumed = resume.resume_if_answered(
+                record, issue, self.config.agent_login
+            ) or resume.resume_if_budget_allows(
+                record,
+                ledger,
+                self.config.max_issue_tokens,
+                self.config.max_issue_dollars,
+            )
             if not resumed:
                 return finish_process(
                     self.store, record, ledger, "waiting for a human answer", None, started
                 )
+            self.store.upsert(record)
 
         topics = detect_out_of_scope(issue)
         if resumed and topics and previous_blocked_on == "out_of_scope":
@@ -151,27 +159,6 @@ class IssueProcessor:
         self.git_host.create_branch(repo_dir, branch)
         self.store.upsert(record)
         return repo_dir
-
-    def _resume_if_answered(self, record: IssueRecord, issue: Issue) -> bool:
-        resume_after = resume.resume_after_comment_id(record)
-        bot = self.config.agent_login
-        replies = [
-            {
-                "id": comment.id,
-                "author": comment.author,
-                "body": comment.body,
-                "created_at": comment.created_at,
-            }
-            for comment in issue.comments
-            if comment.id > resume_after and comment.author != bot
-        ]
-        if not replies:
-            return False
-        record.conversation["human_replies"] = replies
-        record.transition(IssueState.RESUMED)
-        record.blocked_on = None
-        self.store.upsert(record)
-        return True
 
     def _pause_for_guardrail(
         self,

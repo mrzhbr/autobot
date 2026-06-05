@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from autobot.models import IssueRecord, IssueState, utc_now
+from autobot.cost import CostLedger
+from autobot.models import Issue, IssueRecord, IssueState, utc_now
 
 
 class PausedForHuman(RuntimeError):
@@ -14,6 +15,40 @@ def resume_after_comment_id(record: IssueRecord) -> int:
         pause = record.conversation.get(key) or {}
         ids.append(int(pause.get("comment_id") or 0))
     return max(ids)
+
+
+def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bool:
+    resume_after = resume_after_comment_id(record)
+    replies = [
+        {
+            "id": comment.id,
+            "author": comment.author,
+            "body": comment.body,
+            "created_at": comment.created_at,
+        }
+        for comment in issue.comments
+        if comment.id > resume_after and comment.author != bot
+    ]
+    if not replies:
+        return False
+    record.conversation["human_replies"] = replies
+    record.transition(IssueState.RESUMED)
+    record.blocked_on = None
+    return True
+
+
+def resume_if_budget_allows(
+    record: IssueRecord,
+    ledger: CostLedger,
+    max_tokens: int | None,
+    max_dollars: float | None,
+) -> bool:
+    if record.blocked_on != "budget" or ledger.hit_budget(max_tokens, max_dollars):
+        return False
+    record.conversation["budget_resumed_at"] = utc_now()
+    record.transition(IssueState.RESUMED)
+    record.blocked_on = None
+    return True
 
 
 def mark_clarification_still_needed(

@@ -20,6 +20,7 @@ class GitHubIssueTracker:
     def __init__(self, token: str | None, agent_login: str | None) -> None:
         self.token = token
         self.agent_login = agent_login
+        self._last_response_headers: dict[str, str] = {}
 
     def list_actionable(self, repo: str) -> list[int]:
         if not self.agent_login:
@@ -57,16 +58,18 @@ class GitHubIssueTracker:
         )
 
     def _request_pages(self, path: str) -> list[Any]:
-        items: list[Any] = []
-        page = 1
-        while True:
-            data = self._request("GET", f"{path}?per_page=100&page={page}")
-            if not isinstance(data, list):
-                raise GitHubError(f"GitHub pagination expected a list for {path}")
-            items.extend(data)
-            if len(data) < 100:
-                return items
-            page += 1
+        first = self._request("GET", f"{path}?per_page=100&page=1")
+        if not isinstance(first, list):
+            raise GitHubError(f"GitHub pagination expected a list for {path}")
+        page = _last_link_page(self._last_response_headers.get("Link", ""))
+        if page is None and len(first) == 100:
+            page = 2
+        if page is None or page == 1:
+            return first
+        last = self._request("GET", f"{path}?per_page=100&page={page}")
+        if not isinstance(last, list):
+            raise GitHubError(f"GitHub pagination expected a list for {path}")
+        return _dedupe_by_id([*first, *last])
 
     def comment(self, repo: str, issue_number: int, text: str) -> int:
         data = self._request(
@@ -91,10 +94,34 @@ class GitHubIssueTracker:
             request.add_header("Authorization", f"Bearer {self.token}")
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
+                self._last_response_headers = dict(response.headers.items())
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             payload = exc.read().decode("utf-8", errors="replace")
             raise GitHubError(f"GitHub {method} {path} failed: {exc.code} {payload}") from exc
+
+
+def _last_link_page(link: str) -> int | None:
+    for part in link.split(","):
+        if 'rel="last"' not in part:
+            continue
+        url = part[part.find("<") + 1 : part.find(">")]
+        query = urllib.parse.urlparse(url).query
+        page = urllib.parse.parse_qs(query).get("page", [None])[0]
+        return int(page) if page else None
+    return None
+
+
+def _dedupe_by_id(items: list[Any]) -> list[Any]:
+    seen: set[Any] = set()
+    deduped: list[Any] = []
+    for item in items:
+        key = item.get("id") if isinstance(item, dict) else id(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
 
 
 class GitHubGitHost:

@@ -94,6 +94,8 @@ Run a local dry-run against a public issue body:
 
 Dry-run still reads the GitHub issue, but it writes only under `.autobot/work`, uses a generated local git repo, skips Docker, skips outward comments and labels, and returns `dry-run://draft-pr`.
 
+Set `GITHUB_TOKEN` for dry-run reads when the public GitHub API rate limit is exhausted.
+
 Command output includes the per-issue summary required for review:
 
 - branch
@@ -114,7 +116,7 @@ seen -> triaged -> needs_spec -> asked -> waiting -> resumed -> spec_ready
 
 If triage returns `ready: false`, the agent posts one comment with up to three questions, stores the comment id, marks the issue `agent-waiting`, and exits. On the next `run` or `watch`, comments with ids greater than the stored question comment and not authored by the bot are folded into the issue record before triage is rerun.
 
-If `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS` is reached, the agent records a `budget_pause`, moves the issue to `waiting`, and posts one human-facing notification in live mode. Rerun after increasing the budget or changing the issue state.
+If `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS` is reached, the agent records a `budget_pause`, moves the issue to `waiting`, and posts one human-facing notification in live mode. Rerun after increasing the budget or changing the issue state; no additional issue comment is required when the new budget allows progress.
 
 If an issue appears to require authentication, cryptography, secrets handling, or database migrations, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
 
@@ -129,7 +131,7 @@ Implemented defaults:
 - issue comments for `ChatChannel`
 - OpenAI or Anthropic HTTP calls for `LLM`
 
-Issue reads fetch paginated comments, so clarification replies after the first 100 comments are still available to the resume loop.
+Issue reads include the newest comment page from GitHub pagination links, so clarification replies after the first 100 comments are still available to the resume loop without walking every page.
 
 Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.py`.
 

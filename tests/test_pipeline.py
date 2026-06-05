@@ -394,6 +394,46 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.blocked_on, "budget")
             self.assertEqual(loaded.conversation["budget_pause"]["phase"], "triage")
 
+    def test_budget_pause_resumes_after_budget_is_increased(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            low_budget = replace(
+                Config.from_env(root=root, dry_run=True, mock_llm=True),
+                max_issue_tokens=1,
+            )
+            tracker = FakeTracker()
+            store = StateStore(low_budget.db_path)
+            first_llm = BudgetLLM()
+            first_processor = IssueProcessor(
+                config=low_budget,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=first_llm,
+                audit=AuditLog(low_budget.audit_path),
+            )
+
+            first = first_processor.process("owner/repo", 1)
+            high_budget = replace(low_budget, max_issue_tokens=10)
+            second_processor = IssueProcessor(
+                config=high_budget,
+                store=StateStore(high_budget.db_path),
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=BudgetLLM(),
+                audit=AuditLog(high_budget.audit_path),
+            )
+            second = second_processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.PR_OPEN)
+            self.assertEqual(second.pr_url, "dry-run://draft-pr")
+            loaded = StateStore(high_budget.db_path).get("owner/repo", 1)
+            assert loaded is not None
+            self.assertIn("budget_resumed_at", loaded.conversation)
+
     def test_comment_limit_blocks_guardrail_comment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
