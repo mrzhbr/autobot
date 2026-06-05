@@ -4,21 +4,17 @@ import time
 from pathlib import Path
 
 from autobot import resume
-from autobot import sandbox as sandbox_ops
 from autobot.adapters import LLM, ChatChannel, GitHost, IssueTracker
 from autobot.audit import AuditLog, record_best_effort
 from autobot.config import Config
 from autobot.context import gather_context
 from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
+from autobot.implementation import ImplementationRunner
 from autobot.labels import set_issue_label
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
-from autobot.pr_flow import finalize_draft_pr
 from autobot.result import abandon_process, finish_process
-from autobot.review import ReviewerPanel, format_blockers, review_round_artifact
-from autobot.scanner import ensure_no_secret_like_values
 from autobot.state import StateStore
-from autobot.tests import detect_verification_commands, merge_verification_commands
 from autobot.workspace import branch_name, prepare_dry_run_repo, repo_work_dir
 
 
@@ -247,119 +243,16 @@ class IssueProcessor:
         ledger: CostLedger,
         repo_dir: Path,
     ) -> str | None:
-        record.transition(IssueState.IMPLEMENTING)
-        self.store.upsert(record)
-        dry_run = self.config.dry_run
-        setup_command = sandbox_ops.detect_setup_command(
-            repo_dir, self.config.sandbox_setup_command
+        runner = ImplementationRunner(
+            self.config,
+            self.store,
+            self.tracker,
+            self.git_host,
+            self.llm,
+            self.audit,
+            self._pause_if_budget_hit,
         )
-        sandbox = sandbox_ops.DockerSandbox(
-            repo_dir,
-            self.config.sandbox_image,
-            setup_command,
-            self.config.sandbox_network,
-        )
-        try:
-            if not dry_run:
-                set_issue_label(self.tracker, self.audit, record, issue, "agent-working")
-                sandbox.prepare()
-
-            test_plan = self.llm.write_tests(issue, gather_context(repo_dir, issue))
-            ledger.add(test_plan.usage)
-            self._pause_if_budget_hit(issue, record, ledger, "test authoring")
-            if not test_plan.changes:
-                raise RuntimeError("test author returned no changes")
-            sandbox_ops.apply_changes(repo_dir, sandbox, test_plan.changes, dry_run)
-            baseline = sandbox_ops.run_verification_allow_failure(
-                sandbox, test_plan.test_commands, dry_run
-            )
-            plan = self.llm.implement(issue, gather_context(repo_dir, issue))
-            ledger.add(plan.usage)
-            self._pause_if_budget_hit(issue, record, ledger, "implementation")
-            if not plan.changes:
-                raise RuntimeError("implementer returned no changes")
-            merge = merge_verification_commands
-            all_changes = [*test_plan.changes, *plan.changes]
-            impl_commands = list(plan.test_commands)
-            sandbox_ops.ensure_no_secret_commands([*test_plan.test_commands, *impl_commands])
-            record.plan = {
-                "acceptance_tests": test_plan.plan,
-                "acceptance_test_baseline": baseline,
-                "plan": plan.plan,
-                "test_author_commands": test_plan.test_commands,
-                "test_commands": plan.test_commands,
-                "at": utc_now(),
-            }
-            self.store.upsert(record)
-            sandbox_ops.apply_changes(repo_dir, sandbox, plan.changes, dry_run)
-            detected = detect_verification_commands(repo_dir, self.config.default_test_command)
-            verification_commands = merge(test_plan.test_commands, impl_commands, detected)
-            sandbox_ops.ensure_no_secret_commands(verification_commands)
-            record.plan["verification_commands"] = verification_commands
-            self.store.upsert(record)
-            test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
-
-            record.transition(IssueState.REVIEW_LOOP)
-            self.store.upsert(record)
-            panel = ReviewerPanel(self.llm, models=self.config.review_models)
-            for round_number in range(1, self.config.max_review_rounds + 1):
-                record.review_rounds = round_number
-                diff = self.git_host.current_diff(repo_dir)
-                ensure_no_secret_like_values(diff, "diff")
-                outcome = panel.review(issue, diff, ledger)
-                record.conversation.setdefault("review_reports", []).append(
-                    review_round_artifact(round_number, outcome)
-                )
-                self.store.upsert(record)
-                self._pause_if_budget_hit(issue, record, ledger, "review")
-                if not outcome.blocking_findings:
-                    break
-                if round_number >= self.config.max_review_rounds:
-                    raise RuntimeError("review loop stopped with blocking findings")
-                fix = self.llm.implement(
-                    issue,
-                    gather_context(repo_dir, issue),
-                    format_blockers(outcome.blocking_findings),
-                )
-                ledger.add(fix.usage)
-                self._pause_if_budget_hit(issue, record, ledger, "review fix")
-                if not fix.changes:
-                    raise RuntimeError("implementer returned no fixes for blocking findings")
-                all_changes.extend(fix.changes)
-                impl_commands.extend(fix.test_commands)
-                sandbox_ops.apply_changes(repo_dir, sandbox, fix.changes, dry_run)
-                verification_commands = merge(test_plan.test_commands, impl_commands, detected)
-                sandbox_ops.ensure_no_secret_commands(verification_commands)
-                record.plan["verification_commands"] = verification_commands
-                self.store.upsert(record)
-                test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
-            diff = self.git_host.current_diff(repo_dir)
-            ensure_no_secret_like_values(diff, "diff")
-            if dry_run:
-                record.files_touched = [change.path for change in all_changes]
-                record.conversation["ci_status"] = {"state": "dry-run"}
-                record.conversation["pr_url"] = "dry-run://draft-pr"
-                record.pr_url = "dry-run://draft-pr"
-                record.transition(IssueState.PR_OPEN)
-                record.cost = ledger.to_dict()
-                self.store.upsert(record)
-                return "dry-run://draft-pr"
-            sandbox.close()
-            return finalize_draft_pr(
-                issue,
-                record,
-                ledger,
-                repo_dir,
-                verification_commands,
-                test_output,
-                self.git_host,
-                self.tracker,
-                self.audit,
-                self.store,
-            )
-        finally:
-            if not dry_run:
-                sandbox.close()
+        return runner.run(issue, record, ledger, repo_dir)
 
     def _pause_if_budget_hit(
         self,
