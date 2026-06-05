@@ -129,6 +129,25 @@ class LLMTests(unittest.TestCase):
         self.assertIn("...[truncated]", prompt)
         self.assertNotIn(" tail", prompt)
 
+    def test_prompts_redact_secret_like_issue_text_and_comments(self) -> None:
+        llm = _llm()
+        token = "ghp_" + ("A" * 36)
+        issue = Issue(
+            "owner/repo",
+            1,
+            f"Update docs {token}",
+            f"Use this token: {token}",
+            "alice",
+            [],
+            [IssueComment(7, "alice", f"Comment includes {token}", "2026-06-05")],
+        )
+
+        llm.implement(issue, [ContextFile("README.md", "# Demo\n")])
+
+        _, _, prompt = llm.calls[-1]
+        self.assertNotIn(token, prompt)
+        self.assertGreaterEqual(prompt.count("[redacted-secret]"), 3)
+
     def test_http_llm_infers_anthropic_provider_from_only_anthropic_key(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmp,

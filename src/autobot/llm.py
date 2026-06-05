@@ -117,7 +117,7 @@ class HttpLLM:
             "Decide if this issue is specified enough to implement without guessing. "
             "Ask only when a wrong guess is likely. Return JSON with keys: "
             "ready boolean, questions array of strings, reason string.\n\n"
-            f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
+            f"{_issue_prompt(issue)}\n\nComments:\n{_comments(issue)}\n\n"
             f"Repo context:\n{format_context(context)}"
         )
         data, usage = self._json_call("triage", self.config.triage_model, prompt)
@@ -144,7 +144,7 @@ class HttpLLM:
             "test_commands array. Each change has path, action write/delete, and content. "
             "For writes, provide complete file content, not patches. Keep changes small.\n"
             f"{ENGINEERING_DISCIPLINE}\n"
-            f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
+            f"{_issue_prompt(issue)}\n\nComments:\n{_comments(issue)}\n\n"
             f"Blocking review findings to fix:\n{findings or 'None'}\n\n"
             f"Repo context:\n{format_context(context)}"
         )
@@ -175,7 +175,7 @@ class HttpLLM:
             "has path, action write/delete, and content. For writes, provide complete file "
             "content, not patches. Do not implement product code.\n"
             f"{ENGINEERING_DISCIPLINE}\n"
-            f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
+            f"{_issue_prompt(issue)}\n\nComments:\n{_comments(issue)}\n\n"
             f"Repo context:\n{format_context(context)}"
         )
         data, usage = self._json_call("test", self.config.implement_model, prompt)
@@ -205,7 +205,7 @@ class HttpLLM:
             f"Review this diff with the lens: {lens}. Return strict JSON with key findings. "
             "Each finding has severity, file, line, message, blocking boolean. "
             "Blocking means the PR should not be opened until fixed.\n\n"
-            f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
+            f"{_issue_prompt(issue)}\n\nComments:\n{_comments(issue)}\n\n"
             f"Diff:\n{diff[:30000]}"
         )
         data, usage = self._json_call("review", model, prompt)
@@ -330,9 +330,17 @@ def _comments(issue: Issue) -> str:
     if not issue.comments:
         return "None"
     return "\n\n".join(
-        f"{comment.author}: {_truncate(comment.body, COMMENT_TEXT_LIMIT)}"
+        f"{comment.author}: {_truncate(_prompt_text(comment.body), COMMENT_TEXT_LIMIT)}"
         for comment in issue.comments[-12:]
     )
+
+
+def _issue_prompt(issue: Issue) -> str:
+    return f"Issue: {_prompt_text(issue.title)}\n\n{_prompt_text(issue.body)}"
+
+
+def _prompt_text(text: str) -> str:
+    return redact_secret_like_values(text)
 
 
 def _truncate(text: str, limit: int) -> str:
