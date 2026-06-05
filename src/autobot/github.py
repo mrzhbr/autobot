@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import subprocess
 import urllib.parse
@@ -229,7 +230,24 @@ class GitHubGitHost:
     def current_diff(self, repo_dir: Path) -> str:
         stat = self._git(repo_dir, ["diff", "--stat", "HEAD"])
         diff = self._git(repo_dir, ["diff", "HEAD"])
-        return stat + "\n" + diff
+        untracked = self._untracked_diff(repo_dir)
+        return "\n".join(part for part in (stat, diff, untracked) if part)
+
+    def _untracked_diff(self, repo_dir: Path) -> str:
+        paths = self._git(repo_dir, ["ls-files", "--others", "--exclude-standard"]).splitlines()
+        hunks: list[str] = []
+        root = repo_dir.resolve()
+        for path in paths:
+            target = (repo_dir / path).resolve()
+            target.relative_to(root)
+            if not target.is_file():
+                continue
+            lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+            hunk = difflib.unified_diff(
+                [], lines, fromfile="/dev/null", tofile=f"b/{path}", lineterm=""
+            )
+            hunks.append(f"diff --git a/{path} b/{path}\nnew file mode 100644\n" + "\n".join(hunk))
+        return "\n".join(hunks)
 
     def commit_all(self, repo_dir: Path, message: str) -> bool:
         self._git(repo_dir, ["add", "-A"])
