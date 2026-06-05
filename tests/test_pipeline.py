@@ -1002,9 +1002,10 @@ class PipelineTests(unittest.TestCase):
                 title="Add OAuth login",
                 body="Implement authentication for the app.",
             )
+            store = StateStore(config.db_path)
             processor = IssueProcessor(
                 config=config,
-                store=StateStore(config.db_path),
+                store=store,
                 tracker=tracker,
                 git_host=FakeGitHost(),
                 chat=IssueCommentChat(tracker),
@@ -1016,6 +1017,10 @@ class PipelineTests(unittest.TestCase):
                 processor.process("owner/repo", 1)
 
             self.assertEqual(tracker.comments, [])
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.ABANDONED)
+            self.assertIn("comment limit reached", loaded.blocked_on or "")
 
     def test_comment_limit_blocks_clarification_comment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

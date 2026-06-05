@@ -93,7 +93,11 @@ class IssueProcessor:
                 started,
             )
         if topics and "guardrail_pause" not in record.conversation:
-            return self._pause_for_guardrail(issue, record, ledger, topics, started)
+            try:
+                return self._pause_for_guardrail(issue, record, ledger, topics, started)
+            except Exception as exc:
+                message = abandon_process(self.store, record, ledger, exc, started)
+                raise RuntimeError(message) from exc
 
         try:
             repo_dir = self._clone_and_branch(issue, record)
