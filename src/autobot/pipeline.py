@@ -11,6 +11,7 @@ from autobot.config import Config
 from autobot.context import gather_context
 from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
+from autobot.labels import set_issue_label
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr import build_pr_body
 from autobot.result import finish_process
@@ -178,9 +179,8 @@ class IssueProcessor:
         else:
             comment_id = self.chat.ask(issue, [question])
             self.comments_this_run += 1
-            self.tracker.set_label(issue.repo, issue.number, "agent-waiting")
             self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
-            self.audit.record("label", issue.repo, issue.number, {"label": "agent-waiting"})
+            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
         record.transition(IssueState.ASKED)
         record.conversation["guardrail_pause"] = {
             "topics": topics,
@@ -214,9 +214,8 @@ class IssueProcessor:
         else:
             comment_id = self.chat.ask(issue, questions[:3])
             self.comments_this_run += 1
-            self.tracker.set_label(issue.repo, issue.number, "agent-waiting")
             self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
-            self.audit.record("label", issue.repo, issue.number, {"label": "agent-waiting"})
+            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
         record.transition(IssueState.ASKED)
         record.conversation["asked_comment_id"] = comment_id
         record.conversation["asked_at"] = utc_now()
@@ -255,8 +254,7 @@ class IssueProcessor:
             self.config.sandbox_network,
         )
         if not dry_run:
-            self.tracker.set_label(issue.repo, issue.number, "agent-working")
-            self.audit.record("label", issue.repo, issue.number, {"label": "agent-working"})
+            set_issue_label(self.tracker, self.audit, record, issue, "agent-working")
             sandbox.prepare()
 
         test_plan = self.llm.write_tests(issue, gather_context(repo_dir, issue))
@@ -354,8 +352,7 @@ class IssueProcessor:
         record.pr_url = pr_url
         self.store.upsert(record)
         self.audit.record("draft_pr", issue.repo, issue.number, {"url": pr_url, "branch": branch})
-        self.tracker.set_label(issue.repo, issue.number, "agent-pr-open")
-        self.audit.record("label", issue.repo, issue.number, {"label": "agent-pr-open"})
+        set_issue_label(self.tracker, self.audit, record, issue, "agent-pr-open")
         record.files_touched = changed_files(repo_dir)
         record.transition(IssueState.PR_OPEN)
         self.store.upsert(record)
@@ -383,9 +380,8 @@ class IssueProcessor:
                 raise RuntimeError("comment limit reached before budget pause could be posted")
             comment_id = self.chat.notify(issue, text)
             self.comments_this_run += 1
-            self.tracker.set_label(issue.repo, issue.number, "agent-waiting")
             self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
-            self.audit.record("label", issue.repo, issue.number, {"label": "agent-waiting"})
+            set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
             pause["comment_id"] = comment_id
             record.conversation["resume_after_comment_id"] = comment_id
         record.transition(IssueState.WAITING)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -65,6 +66,12 @@ class PostPrLabelFailTracker(FakeTracker):
     def set_label(self, repo: str, issue_number: int, label: str) -> None:
         if label == "agent-pr-open":
             raise RuntimeError("label update failed")
+
+
+class WaitingLabelFailTracker(FakeTracker):
+    def set_label(self, repo: str, issue_number: int, label: str) -> None:
+        if label == "agent-waiting":
+            raise RuntimeError("waiting label failed")
 
 
 class FakeGitHost:
@@ -462,7 +469,7 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(loaded.pr_url, "dry-run://draft-pr")
 
-    def test_pr_url_persists_if_post_pr_label_update_fails(self) -> None:
+    def test_pr_open_label_failure_does_not_abandon_opened_pr(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = Config.from_env(root=root, dry_run=False, mock_llm=True)
@@ -479,17 +486,58 @@ class PipelineTests(unittest.TestCase):
                 audit=AuditLog(config.audit_path),
             )
 
-            with (
-                patch("autobot.sandbox.subprocess.run", return_value=completed),
-                self.assertRaisesRegex(RuntimeError, "label update failed"),
-            ):
-                processor.process("owner/repo", 1)
+            with patch("autobot.sandbox.subprocess.run", return_value=completed):
+                result = processor.process("owner/repo", 1)
 
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(result.pr_url, "https://github.test/pull/1")
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
-            self.assertEqual(loaded.state, IssueState.ABANDONED)
+            self.assertEqual(loaded.state, IssueState.PR_OPEN)
             self.assertEqual(loaded.pr_url, "https://github.test/pull/1")
             self.assertEqual(loaded.conversation["pr_url"], "https://github.test/pull/1")
+            self.assertEqual(
+                loaded.conversation["label_warnings"][0]["label"],
+                "agent-pr-open",
+            )
+
+    def test_waiting_label_failure_keeps_clarification_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = WaitingLabelFailTracker()
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=SequencedLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = processor.process("owner/repo", 1)
+            second = processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(len(tracker.comments), 1)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.WAITING)
+            self.assertEqual(loaded.conversation["asked_comment_id"], 1)
+            self.assertEqual(
+                loaded.conversation["label_warnings"][0]["label"],
+                "agent-waiting",
+            )
+            audit_rows = [
+                json.loads(line)
+                for line in config.audit_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertTrue(
+                any(row["action"] == "label_failed" for row in audit_rows),
+            )
 
     def test_abandoned_rerun_does_not_restart_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
