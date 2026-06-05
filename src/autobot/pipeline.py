@@ -13,7 +13,7 @@ from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.implementation import ImplementationRunner
 from autobot.labels import set_issue_label
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
-from autobot.result import abandon_process, finish_process
+from autobot.result import abandon_process, finish_process, terminal_process_result
 from autobot.state import StateStore
 from autobot.workspace import branch_name, prepare_dry_run_repo, repo_work_dir
 
@@ -45,19 +45,13 @@ class IssueProcessor:
         ledger = CostLedger(record.cost)
 
         if record.state == IssueState.ABANDONED:
-            return finish_process(
-                self.store,
+            return terminal_process_result(
                 record,
-                ledger,
                 "issue is abandoned; clear the state record before retrying",
-                None,
-                started,
             )
 
         if record.state == IssueState.PR_OPEN:
-            return finish_process(
-                self.store, record, ledger, "draft pull request already open", None, started
-            )
+            return terminal_process_result(record, "draft pull request already open")
 
         issue = self.tracker.get(repo, issue_number)
 

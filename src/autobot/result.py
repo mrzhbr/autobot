@@ -22,6 +22,20 @@ def abandon_process(
     return message
 
 
+def terminal_process_result(record: IssueRecord, message: str) -> ProcessResult:
+    return ProcessResult(
+        state=record.state,
+        message=message,
+        pr_url=record.pr_url or record.conversation.get("pr_url"),
+        cost=record.cost,
+        branch=record.branch,
+        review_rounds=record.review_rounds,
+        files_touched=record.files_touched,
+        verification_commands=list(record.plan.get("verification_commands") or []),
+        blocked_on=record.blocked_on,
+    )
+
+
 def finish_process(
     store: StateStore,
     record: IssueRecord,

@@ -691,6 +691,11 @@ class PipelineTests(unittest.TestCase):
             record = store.ensure("owner/repo", 1)
             record.transition(IssueState.PR_OPEN)
             record.pr_url = "https://github.test/pull/1"
+            record.cost = {
+                "finished_at": "2026-06-05T00:00:00+00:00",
+                "wall_seconds": 42.5,
+                "calls": [{"role": "triage", "input_tokens": 7, "output_tokens": 3}],
+            }
             store.upsert(record)
 
             result = IssueProcessor(
@@ -706,6 +711,11 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result.state, IssueState.PR_OPEN)
             self.assertEqual(result.pr_url, "https://github.test/pull/1")
             self.assertEqual(result.message, "draft pull request already open")
+            self.assertEqual(result.cost["finished_at"], "2026-06-05T00:00:00+00:00")
+            self.assertEqual(result.cost["wall_seconds"], 42.5)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.cost, record.cost)
 
     def test_pr_open_label_failure_does_not_abandon_opened_pr(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -879,6 +889,11 @@ class PipelineTests(unittest.TestCase):
             record = store.ensure("owner/repo", 1)
             record.transition(IssueState.ABANDONED)
             record.blocked_on = "sandbox command failed"
+            record.cost = {
+                "finished_at": "2026-06-05T00:00:00+00:00",
+                "wall_seconds": 13.25,
+                "calls": [{"role": "triage", "input_tokens": 1, "output_tokens": 2}],
+            }
             store.upsert(record)
             llm = SequencedLLM()
             processor = IssueProcessor(
@@ -896,8 +911,13 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result.state, IssueState.ABANDONED)
             self.assertEqual(result.blocked_on, "sandbox command failed")
             self.assertIn("clear the state record", result.message)
+            self.assertEqual(result.cost["finished_at"], "2026-06-05T00:00:00+00:00")
+            self.assertEqual(result.cost["wall_seconds"], 13.25)
             self.assertEqual(llm.triage_calls, 0)
             self.assertFalse(config.work_root.exists())
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.cost, record.cost)
 
     def test_abandoned_rerun_does_not_read_issue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

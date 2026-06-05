@@ -146,7 +146,7 @@ If an issue title or body appears to require authentication, cryptography, secre
 
 If processing fails unexpectedly before the agent reaches a human-waiting or PR state, the issue is marked `abandoned`; reruns return the stored blocked reason until the state record is cleared for an intentional retry.
 
-If a draft PR is already recorded in state, reruns return the stored PR URL before cloning the repository again.
+If a draft PR is already recorded in state, reruns return the stored PR URL and cost summary before cloning the repository again, without rewriting the original run evidence.
 
 If GitHub reports that the pushed branch already has an open PR before the state row
 has a stored URL, the adapter reuses that PR only when GitHub still marks it as a
