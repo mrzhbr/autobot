@@ -6,8 +6,9 @@ from autobot.adapters import GitHost, IssueTracker
 from autobot.audit import AuditLog, record_best_effort
 from autobot.cost import CostLedger
 from autobot.labels import set_issue_label
-from autobot.models import Issue, IssueRecord, IssueState
+from autobot.models import Issue, IssueRecord, IssueState, utc_now
 from autobot.pr import build_pr_body
+from autobot.scanner import redact_secret_like_values
 from autobot.state import StateStore
 from autobot.workspace import branch_name, changed_files
 
@@ -50,7 +51,20 @@ def finalize_draft_pr(
         record,
     )
     set_issue_label(tracker, audit, record, issue, "agent-pr-open")
-    record.files_touched = changed_files(repo_dir)
+    _record_changed_files(record, repo_dir)
     record.transition(IssueState.PR_OPEN)
     store.upsert(record)
     return pr_url
+
+
+def _record_changed_files(record: IssueRecord, repo_dir: Path) -> None:
+    try:
+        record.files_touched = changed_files(repo_dir)
+    except Exception as exc:
+        record.conversation.setdefault("finalize_warnings", []).append(
+            {
+                "action": "changed_files",
+                "error": redact_secret_like_values(str(exc)),
+                "at": utc_now(),
+            }
+        )

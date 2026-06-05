@@ -814,6 +814,44 @@ class PipelineTests(unittest.TestCase):
                 ],
             )
 
+    def test_changed_files_failure_does_not_abandon_opened_pr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            token = "ghp_" + ("A" * 36)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with (
+                patch("autobot.sandbox.subprocess.run", return_value=completed),
+                patch(
+                    "autobot.pr_flow.changed_files",
+                    side_effect=RuntimeError(f"git failed with {token}"),
+                ),
+            ):
+                result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(result.pr_url, "https://github.test/pull/1")
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.PR_OPEN)
+            self.assertEqual(loaded.pr_url, "https://github.test/pull/1")
+            warning = loaded.conversation["finalize_warnings"][0]
+            self.assertEqual(warning["action"], "changed_files")
+            self.assertIn("[redacted-secret]", warning["error"])
+            self.assertNotIn(token, warning["error"])
+
     def test_waiting_label_failure_keeps_clarification_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
