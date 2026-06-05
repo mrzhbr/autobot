@@ -257,6 +257,42 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result.blocked_on, "out_of_scope")
             self.assertEqual(llm.triage_calls, 0)
 
+    def test_guardrail_reply_does_not_resume_unchanged_out_of_scope_issue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(
+                title="Add OAuth login",
+                body="Implement authentication for the app.",
+            )
+            tracker.comments.append(
+                IssueComment(6, "alice", "Please do it anyway.", "2026-06-05T00:01:00Z")
+            )
+            store = StateStore(config.db_path)
+            record = store.ensure("owner/repo", 1)
+            record.transition(IssueState.WAITING)
+            record.blocked_on = "out_of_scope"
+            record.conversation["guardrail_pause"] = {"comment_id": 5}
+            record.conversation["resume_after_comment_id"] = 5
+            store.upsert(record)
+            llm = SequencedLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.WAITING)
+            self.assertEqual(result.blocked_on, "out_of_scope")
+            self.assertEqual(result.message, "still waiting on out-of-scope guardrail")
+            self.assertEqual(llm.triage_calls, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

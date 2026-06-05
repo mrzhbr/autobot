@@ -102,6 +102,18 @@ class ReviewReport:
     usage: Usage | None = None
 
 
+@dataclass(frozen=True)
+class ProcessResult:
+    state: IssueState
+    message: str
+    pr_url: str | None
+    cost: dict
+    branch: str | None
+    review_rounds: int
+    files_touched: list[str]
+    blocked_on: str | None
+
+
 @dataclass
 class IssueRecord:
     repo: str

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 from autobot.adapters import LLM, ChatChannel, GitHost, IssueTracker
@@ -10,7 +9,7 @@ from autobot.config import Config
 from autobot.context import gather_context
 from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
-from autobot.models import Issue, IssueRecord, IssueState, utc_now
+from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr import build_pr_body
 from autobot.resume import PausedForHuman, resume_after_comment_id
 from autobot.review import ReviewerPanel, format_blockers
@@ -19,18 +18,6 @@ from autobot.scanner import find_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import detect_verification_commands
 from autobot.workspace import branch_name, changed_files, prepare_dry_run_repo
-
-
-@dataclass(frozen=True)
-class ProcessResult:
-    state: IssueState
-    message: str
-    pr_url: str | None
-    cost: dict
-    branch: str | None
-    review_rounds: int
-    files_touched: list[str]
-    blocked_on: str | None
 
 
 class IssueProcessor:
@@ -59,10 +46,25 @@ class IssueProcessor:
         record = self.store.ensure(repo, issue_number)
         ledger = CostLedger(record.cost)
 
-        if record.state == IssueState.WAITING and not self._resume_if_answered(record, issue):
-            return self._finish(record, ledger, "waiting for a human answer", None, started)
+        resumed = False
+        previous_blocked_on = record.blocked_on
+        if record.state == IssueState.WAITING:
+            resumed = self._resume_if_answered(record, issue)
+            if not resumed:
+                return self._finish(record, ledger, "waiting for a human answer", None, started)
 
         topics = detect_out_of_scope(issue)
+        if resumed and topics and previous_blocked_on == "out_of_scope":
+            record.blocked_on = "out_of_scope"
+            record.transition(IssueState.WAITING)
+            self.store.upsert(record)
+            return self._finish(
+                record,
+                ledger,
+                "still waiting on out-of-scope guardrail",
+                None,
+                started,
+            )
         if topics and "guardrail_pause" not in record.conversation:
             return self._pause_for_guardrail(issue, record, ledger, topics, started)
 
