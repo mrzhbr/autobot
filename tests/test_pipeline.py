@@ -9,6 +9,7 @@ from autobot.audit import AuditLog
 from autobot.chat import IssueCommentChat
 from autobot.config import Config
 from autobot.github import GitHubGitHost
+from autobot.llm import MockLLM
 from autobot.models import (
     ContextFile,
     FileChange,
@@ -140,6 +141,30 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.conversation["pr_url"], "dry-run://draft-pr")
             self.assertEqual(loaded.conversation["ci_status"]["state"], "dry-run")
             self.assertEqual(loaded.plan["verification_commands"], ["true"])
+
+    def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = processor.process("owner/repo", 1)
+            second = processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.PR_OPEN)
+            self.assertEqual(second.state, IssueState.PR_OPEN)
+            self.assertEqual(second.message, "draft pull request already open")
+            self.assertEqual(second.pr_url, "dry-run://draft-pr")
 
     def test_budget_hit_pauses_in_waiting_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

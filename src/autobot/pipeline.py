@@ -383,6 +383,7 @@ class IssueProcessor:
         cost["wall_seconds"] = round(time.monotonic() - started, 2)
         record.cost = cost
         self.store.upsert(record)
+        pr_url = pr_url or record.conversation.get("pr_url")
         return ProcessResult(
             state=record.state,
             message=message,
