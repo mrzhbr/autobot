@@ -31,7 +31,7 @@ def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bo
             "created_at": comment.created_at,
         }
         for comment in issue.comments
-        if comment.id > resume_after and comment.author != bot
+        if comment.id > resume_after and not _same_login(comment.author, bot)
     ]
     if not new_replies:
         return False
@@ -105,3 +105,7 @@ def _append_human_replies(
         replies.append(reply)
         seen_ids.add(reply_id)
     return replies
+
+
+def _same_login(author: str, bot: str | None) -> bool:
+    return bool(bot) and author.casefold() == bot.casefold()
