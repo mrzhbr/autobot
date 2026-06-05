@@ -7,7 +7,12 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from autobot.config import Config, infer_llm_provider
+from autobot.config import (
+    Config,
+    incompatible_models_for_provider,
+    infer_llm_provider,
+    model_provider_mismatch_message,
+)
 from autobot.context import format_context
 from autobot.models import (
     ContextFile,
@@ -211,6 +216,9 @@ class HttpLLM:
         return ReviewReport(lens=lens, findings=findings, usage=usage)
 
     def _json_call(self, role: str, model: str, prompt: str) -> tuple[dict[str, Any], Usage]:
+        incompatible = incompatible_models_for_provider(self.provider, [model])
+        if incompatible:
+            raise LLMError(model_provider_mismatch_message(self.provider, incompatible))
         if self.provider == "anthropic":
             return self._anthropic_json(role, model, prompt)
         if self.provider == "openai":

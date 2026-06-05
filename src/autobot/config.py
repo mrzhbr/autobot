@@ -6,6 +6,8 @@ from pathlib import Path
 
 OPENAI_DEFAULT_MODEL = "gpt-4.1"
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4")
+ANTHROPIC_MODEL_PREFIXES = ("claude-",)
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,39 @@ def infer_llm_provider(configured: str | None = None) -> str | None:
     if os.getenv("ANTHROPIC_API_KEY"):
         return "anthropic"
     return None
+
+
+def configured_llm_models(config: Config) -> list[str]:
+    return [
+        config.triage_model,
+        config.implement_model,
+        config.review_model,
+        *config.review_models,
+    ]
+
+
+def model_provider_hint(model: str) -> str | None:
+    normalized = model.strip().lower()
+    if normalized.startswith(OPENAI_MODEL_PREFIXES):
+        return "openai"
+    if normalized.startswith(ANTHROPIC_MODEL_PREFIXES):
+        return "anthropic"
+    return None
+
+
+def incompatible_models_for_provider(provider: str | None, models: list[str]) -> list[str]:
+    if provider not in {"openai", "anthropic"}:
+        return []
+    incompatible: list[str] = []
+    for model in models:
+        hint = model_provider_hint(model)
+        if hint and hint != provider and model not in incompatible:
+            incompatible.append(model)
+    return incompatible
+
+
+def model_provider_mismatch_message(provider: str, models: list[str]) -> str:
+    return f"configured model(s) do not match selected LLM provider {provider}: {', '.join(models)}"
 
 
 def _default_model(provider: str | None) -> str:

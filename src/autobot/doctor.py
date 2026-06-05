@@ -5,7 +5,13 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from autobot.config import Config, infer_llm_provider
+from autobot.config import (
+    Config,
+    configured_llm_models,
+    incompatible_models_for_provider,
+    infer_llm_provider,
+    model_provider_mismatch_message,
+)
 from autobot.github import GitHubIssueTracker
 from autobot.sandbox import SandboxError, ensure_no_secret_commands
 from autobot.scanner import redact_secret_like_values
@@ -39,6 +45,7 @@ def run_doctor(
         _model_check("triage model", config.triage_model),
         _model_check("implement model", config.implement_model),
         _model_check("review model", config.review_model),
+        _llm_model_provider_check(config),
         _sandbox_image_check(config),
         _sandbox_network_check(config),
         _sandbox_setup_check(config),
@@ -135,6 +142,26 @@ def _model_check(name: str, model: str) -> CheckResult:
     if model:
         return CheckResult(name, "pass", model)
     return CheckResult(name, "fail", f"{name} is empty")
+
+
+def _llm_model_provider_check(config: Config) -> CheckResult:
+    if config.mock_llm or config.dry_run:
+        return CheckResult(
+            "llm model/provider", "skip", "mock or dry-run mode does not call a provider"
+        )
+    provider = infer_llm_provider(config.llm_provider)
+    if provider is None:
+        return CheckResult("llm model/provider", "skip", "LLM key missing")
+    if provider not in {"openai", "anthropic"}:
+        return CheckResult("llm model/provider", "skip", "valid LLM_PROVIDER required")
+    incompatible = incompatible_models_for_provider(provider, configured_llm_models(config))
+    if incompatible:
+        return CheckResult(
+            "llm model/provider",
+            "fail",
+            model_provider_mismatch_message(provider, incompatible),
+        )
+    return CheckResult("llm model/provider", "pass", f"models match {provider}")
 
 
 def _sandbox_image_check(config: Config) -> CheckResult:

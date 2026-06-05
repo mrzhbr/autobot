@@ -109,6 +109,27 @@ class LLMTests(unittest.TestCase):
 
         self.assertEqual(llm.provider, "anthropic")
 
+    def test_http_llm_rejects_cross_provider_model_before_request(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"OPENAI_API_KEY": "x"}, clear=True),
+            patch("autobot.llm.urllib.request.urlopen") as urlopen,
+            self.assertRaises(LLMError) as raised,
+        ):
+            llm = HttpLLM(Config.from_env(Path(tmp)))
+            llm.review(
+                "correctness",
+                _issue(),
+                "diff --git a/app.py b/app.py",
+                model="claude-sonnet-4-20250514",
+            )
+
+        urlopen.assert_not_called()
+        self.assertIn(
+            "configured model(s) do not match selected LLM provider openai",
+            str(raised.exception),
+        )
+
     def test_pricing_uses_role_specific_env_vars(self) -> None:
         with patch.dict(
             "os.environ",
