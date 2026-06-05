@@ -211,7 +211,7 @@ export AUTO_TEST_COMMAND="python -m pytest"
 
 `SANDBOX_NETWORK` defaults to `none`. Set it to `bridge` only when setup or verification commands must reach a package registry or another explicitly needed service.
 
-If `SANDBOX_SETUP_COMMAND` is unset, live mode detects common setup profiles: Python installs requirements and the editable project, Node uses the active lockfile manager, Go runs `go mod download`, and Rust runs `cargo fetch`.
+If `SANDBOX_SETUP_COMMAND` is unset, live mode detects common setup profiles: Python installs requirements and the editable project, using `.[dev]` only when a `dev` extra is declared; Node uses the active lockfile manager, Go runs `go mod download`, and Rust runs `cargo fetch`.
 
 If `AUTO_TEST_COMMAND` is unset, the prototype detects common project files and chooses test commands such as `pytest`, `npm test`, `go test ./...`, `cargo test`, `unittest`, or `compileall`. It also detects common lint/type checks such as Ruff, mypy, pyright, `npm run lint`, `npm run typecheck`, `go vet ./...`, and `cargo clippy --all-targets`.
 

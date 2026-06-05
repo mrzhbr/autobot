@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import configparser
 import json
 import shutil
 import subprocess
+import tomllib
 from dataclasses import asdict
 from pathlib import Path
 
@@ -246,8 +248,33 @@ def _python_setup(repo_dir: Path) -> str:
     elif (repo_dir / "requirements.txt").exists():
         commands.append("python -m pip install -r requirements.txt")
     if any((repo_dir / name).exists() for name in ("pyproject.toml", "setup.py", "setup.cfg")):
-        commands.append('python -m pip install -e ".[dev]"')
+        if _has_dev_extra(repo_dir):
+            commands.append('python -m pip install -e ".[dev]"')
+        else:
+            commands.append("python -m pip install -e .")
     return " && ".join(commands)
+
+
+def _has_dev_extra(repo_dir: Path) -> bool:
+    return _pyproject_has_dev_extra(repo_dir / "pyproject.toml") or _setup_cfg_has_dev_extra(
+        repo_dir / "setup.cfg"
+    )
+
+
+def _pyproject_has_dev_extra(path: Path) -> bool:
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    extras = data.get("project", {}).get("optional-dependencies", {})
+    return isinstance(extras, dict) and "dev" in extras
+
+
+def _setup_cfg_has_dev_extra(path: Path) -> bool:
+    parser = configparser.ConfigParser()
+    if not path.exists() or not parser.read(path):
+        return False
+    return parser.has_option("options.extras_require", "dev")
 
 
 def _node_setup(repo_dir: Path) -> str:

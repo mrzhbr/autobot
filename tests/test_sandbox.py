@@ -29,7 +29,7 @@ class SandboxTests(unittest.TestCase):
             (rust_repo / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
 
             python_setup = (
-                'python -m pip install -r requirements-dev.txt && python -m pip install -e ".[dev]"'
+                "python -m pip install -r requirements-dev.txt && python -m pip install -e ."
             )
             self.assertEqual(
                 detect_setup_command(python_repo, None),
@@ -38,6 +38,26 @@ class SandboxTests(unittest.TestCase):
             self.assertEqual(detect_setup_command(node_repo, None), "npm ci")
             self.assertEqual(detect_setup_command(go_repo, None), "go mod download")
             self.assertEqual(detect_setup_command(rust_repo, None), "cargo fetch")
+
+    def test_detect_setup_command_uses_declared_python_dev_extra(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "pyproject.toml").write_text(
+                "[project]\n[project.optional-dependencies]\ndev = ['pytest']\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(detect_setup_command(repo, None), 'python -m pip install -e ".[dev]"')
+
+    def test_detect_setup_command_uses_setup_cfg_dev_extra(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "setup.cfg").write_text(
+                "[metadata]\nname = demo\n[options.extras_require]\ndev =\n    pytest\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(detect_setup_command(repo, None), 'python -m pip install -e ".[dev]"')
 
     def test_detect_setup_command_prefers_explicit_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
