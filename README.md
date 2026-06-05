@@ -14,7 +14,7 @@ The implementation is intentionally thin but end-to-end:
 
 ## Setup
 
-Use Python 3.12 or newer and Docker.
+Use Python 3.12 or newer. Docker is required for live runs, but not for dry-run.
 
 ```sh
 python3 -m venv .venv

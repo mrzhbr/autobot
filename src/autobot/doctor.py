@@ -32,7 +32,7 @@ def run_doctor(
     checks = [
         _command_check("git", ["git", "--version"], command_runner),
         _git_identity_check(config, command_runner),
-        _command_check("docker", ["docker", "--version"], command_runner),
+        _docker_check(config, command_runner),
         _github_token_check(config),
         _agent_login_check(config),
         _llm_key_check(config),
@@ -88,6 +88,12 @@ def _git_config(key: str, command_runner: Callable) -> str | None:
     if result.returncode != 0:
         return None
     return (result.stdout or "").strip() or None
+
+
+def _docker_check(config: Config, command_runner: Callable) -> CheckResult:
+    if config.dry_run:
+        return CheckResult("docker", "skip", "dry-run does not start Docker")
+    return _command_check("docker", ["docker", "--version"], command_runner)
 
 
 def _github_token_check(config: Config) -> CheckResult:

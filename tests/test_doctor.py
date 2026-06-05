@@ -21,6 +21,12 @@ def missing_git_identity_command(command, capture_output, text, check, timeout):
     return passing_command(command, capture_output, text, check, timeout)
 
 
+def missing_docker_command(command, capture_output, text, check, timeout):
+    if command[0] == "docker":
+        raise OSError("docker missing")
+    return passing_command(command, capture_output, text, check, timeout)
+
+
 class FakeTracker:
     def __init__(self, token: str | None, agent_login: str | None) -> None:
         self.token = token
@@ -55,10 +61,11 @@ class DoctorTests(unittest.TestCase):
         with TemporaryDirectory() as tmp, patch.dict("os.environ", {}, clear=True):
             config = Config.from_env(Path(tmp), dry_run=True, mock_llm=True)
 
-            checks = run_doctor(config, command_runner=passing_command, network=False)
+            checks = run_doctor(config, command_runner=missing_docker_command, network=False)
 
             by_name = {check.name: check for check in checks}
             self.assertTrue(doctor_ok(checks))
+            self.assertEqual(by_name["docker"].status, "skip")
             self.assertEqual(by_name["github token"].status, "skip")
             self.assertEqual(by_name["git identity"].status, "skip")
             self.assertEqual(by_name["llm key"].status, "skip")
@@ -76,6 +83,18 @@ class DoctorTests(unittest.TestCase):
             self.assertFalse(doctor_ok(checks))
             self.assertEqual(by_name["git identity"].status, "fail")
             self.assertIn("user.name", by_name["git identity"].message)
+
+    def test_live_doctor_fails_when_docker_is_missing(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=missing_docker_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["docker"].status, "fail")
+            self.assertIn("docker missing", by_name["docker"].message)
 
     def test_live_doctor_warns_when_sandbox_network_allows_egress(self) -> None:
         env = {
