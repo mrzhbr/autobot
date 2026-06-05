@@ -212,7 +212,7 @@ class ImplementationRunner:
         ledger: CostLedger,
         all_changes: list[FileChange],
     ) -> str:
-        record.files_touched = [change.path for change in all_changes]
+        record.files_touched = _unique_paths(all_changes)
         record.conversation["ci_status"] = {"state": "dry-run"}
         record.conversation["pr_url"] = "dry-run://draft-pr"
         record.pr_url = "dry-run://draft-pr"
@@ -237,3 +237,7 @@ def _plan_artifact(
         "test_commands": test_commands,
         "at": utc_now(),
     }
+
+
+def _unique_paths(changes: list[FileChange]) -> list[str]:
+    return list(dict.fromkeys(change.path for change in changes))

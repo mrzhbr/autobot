@@ -333,6 +333,22 @@ class BlockingFixLLM(SequencedLLM):
         return ReviewReport(lens, [], Usage("review", model or "review", 0, 0, 0))
 
 
+class DuplicateFileFixLLM(BlockingFixLLM):
+    def implement(
+        self,
+        issue: Issue,
+        context: list[ContextFile],
+        review_findings: list[str] | None = None,
+    ) -> ImplementationPlan:
+        if review_findings:
+            return ImplementationPlan(
+                plan=["Fix the blocking review finding in the original file."],
+                changes=[FileChange("README.md", "# Dry run repo\n\nFixed.\n")],
+                test_commands=["python -m pytest -q"],
+            )
+        return super().implement(issue, context, review_findings)
+
+
 class PipelineTests(unittest.TestCase):
     def test_waiting_state_resumes_after_human_reply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -502,6 +518,31 @@ class PipelineTests(unittest.TestCase):
                 "Needs a follow-up fix.",
             )
             self.assertEqual(review_reports[1]["blocking_findings"], [])
+
+    def test_dry_run_files_touched_are_unique_after_review_fix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=DuplicateFileFixLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(result.review_rounds, 2)
+            self.assertEqual(result.files_touched, ["tests/test_issue_1.py", "README.md"])
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.files_touched, ["tests/test_issue_1.py", "README.md"])
 
     def test_live_pipeline_uses_detected_sandbox_setup_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
