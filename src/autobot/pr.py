@@ -7,6 +7,8 @@ from autobot.cost import CostLedger
 from autobot.models import Issue, IssueRecord
 from autobot.scanner import redact_secret_like_values
 
+ASSUMPTION_TEXT_LIMIT = 2000
+
 
 def build_pr_body(
     issue: Issue,
@@ -22,7 +24,11 @@ def build_pr_body(
     )
     baseline = record.plan.get("acceptance_test_baseline") or {}
     baseline_state = _baseline_state(baseline)
-    assumptions_json = json.dumps(assumptions, indent=2, sort_keys=True)
+    assumptions_json = json.dumps(
+        _trim_json_strings(assumptions, ASSUMPTION_TEXT_LIMIT),
+        indent=2,
+        sort_keys=True,
+    )
     test_details = (
         "\n\n<details><summary>Test output</summary>\n\n"
         + _fenced_block("text", test_output[-8000:])
@@ -63,6 +69,16 @@ def _inline_code(content: str) -> str:
         fence += "`"
     padding = " " if content.startswith("`") or content.endswith("`") else ""
     return f"{fence}{padding}{content}{padding}{fence}"
+
+
+def _trim_json_strings(value, limit: int):
+    if isinstance(value, dict):
+        return {key: _trim_json_strings(item, limit) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_trim_json_strings(item, limit) for item in value]
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit] + "...[truncated]"
+    return value
 
 
 def _wall_seconds(started_at: str) -> str:

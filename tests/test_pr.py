@@ -86,6 +86,26 @@ class PrBodyTests(unittest.TestCase):
         self.assertNotIn(token, body)
         self.assertIn("[redacted-secret]", body)
 
+    def test_body_truncates_long_assumption_text_as_valid_json(self) -> None:
+        long_reply = "Use a dropdown. " + ("details " * 400)
+        record = IssueRecord("owner/repo", 1)
+        record.conversation["human_replies"] = [{"author": "alice", "body": long_reply}]
+
+        body = build_pr_body(
+            Issue("owner/repo", 1, "Add filter", "Body", "alice", []),
+            record,
+            CostLedger(),
+            [],
+            "",
+            {"state": "success"},
+        )
+
+        assumptions = re.search(r"```json\n(.*?)\n```", body, re.S)
+        assert assumptions is not None
+        payload = json.loads(assumptions.group(1))
+        self.assertLess(len(payload[0]["body"]), len(long_reply))
+        self.assertTrue(payload[0]["body"].endswith("...[truncated]"))
+
     def test_body_fences_backticks_in_assumptions_and_test_output(self) -> None:
         record = IssueRecord("owner/repo", 1)
         record.plan = {"plan": ["Render PR body safely."]}
