@@ -216,7 +216,7 @@ class GitHubGitHost:
                 ["checkout", "-B", default_branch, f"origin/{default_branch}"],
             )
             self._git(target_dir, ["reset", "--hard", f"origin/{default_branch}"])
-            self._git(target_dir, ["clean", "-fd"])
+            self._git(target_dir, ["clean", "-fdx"])
             return
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         cmd = self._auth_git_prefix() + ["clone", f"https://github.com/{repo}.git", str(target_dir)]

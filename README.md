@@ -176,7 +176,7 @@ The prototype enforces these guardrails:
 - Fails fast before live processing when required GitHub or LLM credentials are missing.
 - Refuses to push default-like branches such as `main` and `master`.
 - Does not force-push.
-- Resets reused live clones to the remote default branch before creating the issue branch.
+- Resets reused live clones to the remote default branch and removes ignored files before creating the issue branch.
 - Stops before committing if Git cannot reliably inspect the staged diff.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
 - Mirrors Docker file writes and directory deletes in dry-run mode.

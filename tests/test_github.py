@@ -389,7 +389,7 @@ class GitHubSafetyTests(unittest.TestCase):
                 ],
                 ["git", "checkout", "-B", "main", "origin/main"],
                 ["git", "reset", "--hard", "origin/main"],
-                ["git", "clean", "-fd"],
+                ["git", "clean", "-fdx"],
             ],
         )
 
