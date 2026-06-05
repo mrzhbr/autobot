@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 import urllib.error
@@ -9,6 +10,19 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from autobot.github import GitHubError, GitHubGitHost, GitHubIssueTracker
+
+
+class FakeHTTPResponse:
+    headers: dict = {}
+
+    def read(self) -> bytes:
+        return b'{"ok": true}'
+
+    def __enter__(self) -> FakeHTTPResponse:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
 
 
 class RecordingGitHost(GitHubGitHost):
@@ -34,6 +48,16 @@ class RecordingTracker:
     def _request(self, method: str, path: str, body: dict | None = None):
         self.requests.append((method, path, body))
         return {"html_url": "https://github.test/pull/1"}
+
+
+class CommentRecordingTracker(GitHubIssueTracker):
+    def __init__(self) -> None:
+        super().__init__("token", "bot")
+        self.requests: list[tuple[str, str, dict | None]] = []
+
+    def _request(self, method: str, path: str, body: dict | None = None):
+        self.requests.append((method, path, body))
+        return {"id": 123}
 
 
 class PagedIssueTracker(GitHubIssueTracker):
@@ -186,6 +210,17 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_comment_payload_redacts_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        tracker = CommentRecordingTracker()
+
+        comment_id = tracker.comment("owner/repo", 7, f"failed with {token}")
+
+        self.assertEqual(comment_id, 123)
+        body = tracker.requests[-1][2]
+        assert body is not None
+        self.assertEqual(body["body"], "failed with [redacted-secret]")
+
     def test_reused_clone_is_reset_to_remote_default_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_dir = Path(tmp) / "repo"
@@ -225,6 +260,39 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertEqual(body["head"], "autobot/issue-1")
         self.assertEqual(body["base"], "main")
         self.assertEqual(body["draft"], True)
+
+    def test_open_pull_request_payload_redacts_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        host = RecordingGitHost()
+
+        with patch("autobot.github.GitHubIssueTracker", RecordingTracker):
+            host.open_draft_pr(
+                "owner/repo",
+                "autobot/issue-1",
+                f"Draft: {token}",
+                f"body {token}",
+            )
+
+        body = RecordingTracker.requests[-1][2]
+        assert body is not None
+        self.assertNotIn(token, body["title"])
+        self.assertNotIn(token, body["body"])
+        self.assertIn("[redacted-secret]", body["title"])
+        self.assertIn("[redacted-secret]", body["body"])
+
+    def test_request_json_body_redacts_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        tracker = GitHubIssueTracker("token", "bot")
+
+        with patch(
+            "autobot.github.urllib.request.urlopen", return_value=FakeHTTPResponse()
+        ) as open_url:
+            tracker._request("POST", "/repos/owner/repo/issues/7/labels", {"labels": [token]})
+
+        request = open_url.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertNotIn(token, json.dumps(payload))
+        self.assertEqual(payload["labels"], ["[redacted-secret]"])
 
     def test_issue_get_paginates_comments(self) -> None:
         tracker = PagedIssueTracker()

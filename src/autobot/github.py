@@ -78,7 +78,7 @@ class GitHubIssueTracker:
         data = self._request(
             "POST",
             f"/repos/{repo}/issues/{issue_number}/comments",
-            {"body": text},
+            {"body": redact_secret_like_values(text)},
         )
         return int(data["id"])
 
@@ -105,7 +105,7 @@ class GitHubIssueTracker:
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         url = f"https://api.github.com{path}"
-        data = json.dumps(body).encode("utf-8") if body is not None else None
+        data = json.dumps(_sanitize_body(body)).encode("utf-8") if body is not None else None
         request = urllib.request.Request(url, data=data, method=method)
         request.add_header("Accept", "application/vnd.github+json")
         request.add_header("X-GitHub-Api-Version", "2022-11-28")
@@ -146,6 +146,16 @@ def _dedupe_by_id(items: list[Any]) -> list[Any]:
         seen.add(key)
         deduped.append(item)
     return deduped
+
+
+def _sanitize_body(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _sanitize_body(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_body(item) for item in value]
+    if isinstance(value, str):
+        return redact_secret_like_values(value)
+    return value
 
 
 class GitHubGitHost:
@@ -202,10 +212,10 @@ class GitHubGitHost:
             "POST",
             f"/repos/{repo}/pulls",
             {
-                "title": title,
+                "title": redact_secret_like_values(title),
                 "head": branch,
                 "base": default_branch,
-                "body": body,
+                "body": redact_secret_like_values(body),
                 "draft": True,
             },
         )
