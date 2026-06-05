@@ -294,6 +294,19 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_git_launch_errors_are_wrapped_and_redacted(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        host = GitHubGitHost(token)
+
+        with (
+            patch("autobot.github.subprocess.run", side_effect=OSError(f"missing {token}")),
+            self.assertRaises(GitHubError) as raised,
+        ):
+            host.push("owner/repo", Path("/tmp/repo"), "autobot/issue-1")
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
+
     def test_commit_all_raises_on_cached_diff_errors_before_committing(self) -> None:
         token = "ghp_" + ("A" * 36)
         host = RecordingGitHost()

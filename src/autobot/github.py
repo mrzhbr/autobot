@@ -341,7 +341,11 @@ class GitHubGitHost:
         return self._run(["git", *args], cwd=repo_dir)
 
     def _run(self, cmd: list[str], cwd: Path | None = None) -> str:
-        result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+        try:
+            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            message = redact_secret_like_values(str(exc))
+            raise GitHubError(message or "git command failed") from exc
         if result.returncode != 0:
             message = redact_secret_like_values((result.stderr or result.stdout).strip())
             raise GitHubError(message or "git command failed")
