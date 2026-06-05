@@ -92,6 +92,52 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["sandbox network"].status, "warn")
             self.assertIn("egress", by_name["sandbox network"].message)
 
+    def test_live_doctor_reports_configured_sandbox_setup_command(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "SANDBOX_SETUP_COMMAND": "python -m pip install -e .",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["sandbox setup"].status, "pass")
+            self.assertEqual(by_name["sandbox setup"].message, "python -m pip install -e .")
+
+    def test_live_doctor_warns_when_sandbox_setup_is_auto_detected_later(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["sandbox setup"].status, "warn")
+            self.assertIn("auto-detected after clone", by_name["sandbox setup"].message)
+
+    def test_live_doctor_rejects_secret_like_sandbox_setup_command(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "SANDBOX_SETUP_COMMAND": f"echo {token}",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["sandbox setup"].status, "fail")
+            self.assertNotIn(token, by_name["sandbox setup"].message)
+            self.assertIn(
+                "secret-like values found in sandbox setup command",
+                by_name["sandbox setup"].message,
+            )
+
     def test_issue_readability_uses_tracker_when_requested(self) -> None:
         with (
             TemporaryDirectory() as tmp,

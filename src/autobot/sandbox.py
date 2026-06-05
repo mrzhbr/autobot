@@ -42,6 +42,7 @@ class DockerSandbox:
 
     def prepare(self) -> None:
         if self.setup_command:
+            ensure_no_secret_commands([self.setup_command], "sandbox setup command")
             self.run(self.setup_command, timeout=1800)
 
     def apply_changes(self, changes: list[FileChange]) -> None:
@@ -183,8 +184,8 @@ def _ensure_no_secret_changes(changes: list[FileChange]) -> None:
     _sandbox_secret_check(text, "proposed changes")
 
 
-def ensure_no_secret_commands(commands: list[str]) -> None:
-    _sandbox_secret_check("\n".join(commands), "verification commands")
+def ensure_no_secret_commands(commands: list[str], surface: str = "verification commands") -> None:
+    _sandbox_secret_check("\n".join(commands), surface)
 
 
 def _sandbox_secret_check(text: str, surface: str) -> None:

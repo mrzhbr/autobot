@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 
 from autobot.config import Config
 from autobot.github import GitHubIssueTracker
+from autobot.sandbox import SandboxError, ensure_no_secret_commands
 from autobot.scanner import redact_secret_like_values
 
 
@@ -40,6 +41,7 @@ def run_doctor(
         _model_check("review model", config.review_model),
         _sandbox_image_check(config),
         _sandbox_network_check(config),
+        _sandbox_setup_check(config),
     ]
     checks.append(_issue_check(config, repo, issue, network, tracker_factory))
     return checks
@@ -145,6 +147,20 @@ def _sandbox_network_check(config: Config) -> CheckResult:
         "warn",
         f"{config.sandbox_network} allows container egress; use only when setup/tests need it",
     )
+
+
+def _sandbox_setup_check(config: Config) -> CheckResult:
+    if config.dry_run:
+        return CheckResult("sandbox setup", "skip", "dry-run does not start Docker")
+    if not config.sandbox_setup_command:
+        return CheckResult(
+            "sandbox setup", "warn", "setup command will be auto-detected after clone"
+        )
+    try:
+        ensure_no_secret_commands([config.sandbox_setup_command], "sandbox setup command")
+    except SandboxError as exc:
+        return CheckResult("sandbox setup", "fail", str(exc))
+    return CheckResult("sandbox setup", "pass", config.sandbox_setup_command)
 
 
 def _issue_check(

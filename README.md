@@ -84,7 +84,7 @@ Check live-run prerequisites without posting comments, pushing branches, or open
 ./cli doctor --repo owner/name --issue 123
 ```
 
-Live doctor checks Git, git author identity, Docker, GitHub credentials, LLM credentials, model names, sandbox network settings, and optional issue readability.
+Live doctor checks Git, git author identity, Docker, GitHub credentials, LLM credentials, model names, sandbox image/network/setup settings, and optional issue readability.
 
 Live `run` and `watch` also fail fast when required GitHub or LLM credentials are missing, before cloning or processing an issue. Use `doctor` for the fuller read-only preflight.
 
@@ -149,6 +149,7 @@ The prototype enforces these guardrails:
 - Does not force-push.
 - Resets reused live clones to the remote default branch before creating the issue branch.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
+- Rejects secret-like values in configured sandbox setup commands before Docker execution.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
 - Scans issue text before triage, proposed changes before disk writes, verification commands before execution, and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.
 - Redacts token-like values from CLI, GitHub command, GitHub HTTP, GitHub write payloads, LLM provider, doctor issue-read, SQLite state, abandoned-state, verification-output, PR body, audit, and issue-comment messages.

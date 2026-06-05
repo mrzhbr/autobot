@@ -117,6 +117,24 @@ class SandboxTests(unittest.TestCase):
             self.assertNotIn(token, str(raised.exception))
             self.assertIn("secret-like values found in proposed changes", str(raised.exception))
 
+    def test_docker_prepare_rejects_secret_like_setup_command_before_running(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            token = "sk-" + ("A" * 40)
+
+            with (
+                patch("autobot.sandbox.subprocess.run") as run,
+                self.assertRaises(SandboxError) as raised,
+            ):
+                DockerSandbox(repo, "python:3.12-slim", f"echo {token}").prepare()
+
+            self.assertFalse(run.called)
+            self.assertNotIn(token, str(raised.exception))
+            self.assertIn(
+                "secret-like values found in sandbox setup command", str(raised.exception)
+            )
+
     def test_local_sandbox_rejects_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repo"
