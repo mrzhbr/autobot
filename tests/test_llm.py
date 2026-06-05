@@ -201,6 +201,23 @@ class LLMTests(unittest.TestCase):
         ):
             self.assertEqual(_priced("test", 2000, 500), 0.009)
 
+    def test_pricing_rejects_invalid_env_var(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "REVIEW_INPUT_PRICE_PER_1K": "not-a-number",
+                    "REVIEW_OUTPUT_PRICE_PER_1K": "0.002",
+                },
+                clear=True,
+            ),
+            self.assertRaises(LLMError) as raised,
+        ):
+            _priced("review", 1000, 1000)
+
+        self.assertIn("REVIEW_INPUT_PRICE_PER_1K", str(raised.exception))
+        self.assertIn("must be a number", str(raised.exception))
+
     def test_parse_json_redacts_non_json_model_text(self) -> None:
         token = "ghp_" + ("A" * 36)
 

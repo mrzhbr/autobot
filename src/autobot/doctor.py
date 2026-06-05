@@ -174,6 +174,13 @@ def _llm_pricing_check(config: Config) -> CheckResult:
     provider = infer_llm_provider(config.llm_provider)
     if provider not in {"openai", "anthropic"}:
         return CheckResult("llm pricing", "skip", "valid LLM_PROVIDER required")
+    invalid = _invalid_price_vars()
+    if invalid:
+        return CheckResult(
+            "llm pricing",
+            "fail",
+            "LLM pricing env vars must be numeric: " + ", ".join(invalid),
+        )
     missing = _missing_price_vars()
     if missing:
         return CheckResult(
@@ -198,6 +205,21 @@ def _missing_price_vars() -> list[str]:
 def _missing_role_price_vars(role: str) -> list[str]:
     names = [f"{role}_INPUT_PRICE_PER_1K", f"{role}_OUTPUT_PRICE_PER_1K"]
     return [name for name in names if not os.getenv(name)]
+
+
+def _invalid_price_vars() -> list[str]:
+    invalid = []
+    for role in ("TRIAGE", "IMPLEMENT", "TEST", "REVIEW"):
+        for suffix in ("INPUT", "OUTPUT"):
+            name = f"{role}_{suffix}_PRICE_PER_1K"
+            value = os.getenv(name)
+            if not value:
+                continue
+            try:
+                float(value)
+            except ValueError:
+                invalid.append(name)
+    return invalid
 
 
 def _sandbox_image_check(config: Config) -> CheckResult:

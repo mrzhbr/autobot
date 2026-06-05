@@ -343,15 +343,28 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _priced(role: str, input_tokens: Any, output_tokens: Any) -> float | None:
-    price_role = "IMPLEMENT" if role == "test" else role.upper()
-    in_price = os.getenv(f"{role.upper()}_INPUT_PRICE_PER_1K") or os.getenv(
-        f"{price_role}_INPUT_PRICE_PER_1K"
-    )
-    out_price = os.getenv(f"{role.upper()}_OUTPUT_PRICE_PER_1K") or os.getenv(
-        f"{price_role}_OUTPUT_PRICE_PER_1K"
-    )
-    if not in_price or not out_price:
+    in_price = _role_price(role, "INPUT")
+    out_price = _role_price(role, "OUTPUT")
+    if in_price is None or out_price is None:
         return None
-    total = (int(input_tokens or 0) / 1000) * float(in_price)
-    total += (int(output_tokens or 0) / 1000) * float(out_price)
+    total = (int(input_tokens or 0) / 1000) * in_price
+    total += (int(output_tokens or 0) / 1000) * out_price
     return round(total, 6)
+
+
+def _role_price(role: str, direction: str) -> float | None:
+    role_name = role.upper()
+    price = _price_value(f"{role_name}_{direction}_PRICE_PER_1K")
+    if price is not None or role_name != "TEST":
+        return price
+    return _price_value(f"IMPLEMENT_{direction}_PRICE_PER_1K")
+
+
+def _price_value(name: str) -> float | None:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise LLMError(f"{name} must be a number") from exc
