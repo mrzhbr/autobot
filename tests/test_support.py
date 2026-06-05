@@ -28,6 +28,20 @@ class SupportTests(unittest.TestCase):
 
         self.assertTrue(findings)
 
+    def test_secret_scanner_flags_raw_github_token(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        findings = find_secret_like_values(f"+GITHUB_TOKEN={token}\n")
+
+        self.assertTrue(findings)
+
+    def test_secret_scanner_flags_raw_openai_token(self) -> None:
+        token = "sk-" + ("A" * 40)
+
+        findings = find_secret_like_values(f"+OPENAI_API_KEY={token}\n")
+
+        self.assertTrue(findings)
+
     def test_detects_python_verification_commands(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
