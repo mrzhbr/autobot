@@ -92,7 +92,7 @@ class IssueProcessor:
                     )
                 self.store.upsert(record)
 
-        topics = detect_out_of_scope(issue)
+        topics = detect_out_of_scope(issue, record.conversation.get("human_replies"))
         if resumed and topics and previous_blocked_on == "out_of_scope":
             record.blocked_on = "out_of_scope"
             record.transition(IssueState.WAITING)

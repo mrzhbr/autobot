@@ -1741,6 +1741,49 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertIn("secrets handling", loaded.conversation["guardrail_pause"]["topics"])
 
+    def test_out_of_scope_clarification_reply_pauses_before_triage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(
+                title="Update docs",
+                body="Please document the demo behavior.",
+            )
+            tracker.comments.append(
+                IssueComment(
+                    2,
+                    "alice",
+                    "Actually add OAuth login while updating the docs.",
+                    "2026-06-05T00:01:00Z",
+                )
+            )
+            store = StateStore(config.db_path)
+            record = store.ensure("owner/repo", 1)
+            record.transition(IssueState.WAITING)
+            record.blocked_on = "clarification"
+            record.conversation["asked_comment_id"] = 1
+            record.conversation["resume_after_comment_id"] = 1
+            store.upsert(record)
+            llm = SequencedLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.WAITING)
+            self.assertEqual(result.blocked_on, "out_of_scope")
+            self.assertEqual(llm.triage_calls, 0)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertIn("authentication", loaded.conversation["guardrail_pause"]["topics"])
+
     def test_waiting_guardrail_ignores_comments_before_pause(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

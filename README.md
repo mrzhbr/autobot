@@ -147,7 +147,7 @@ If `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS` is reached, the agent records a `bu
 Reruns check previously recorded issue cost before issue reads, clone, or LLM work, so lowering a budget pauses immediately.
 If `COMMENT_LIMIT_PER_RUN=0`, budget pauses still persist in `waiting` but skip the issue comment.
 
-If an issue title or body appears to require authentication, cryptography, secrets handling, or database migrations, or if the issue text or comments contain raw secret-like values, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
+If an issue title, body, or resumed clarification reply appears to require authentication, cryptography, secrets handling, or database migrations, or if the issue text or comments contain raw secret-like values, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
 
 If processing fails unexpectedly before the agent reaches a human-waiting or PR state, the issue is marked `abandoned`; reruns return the stored blocked reason until the state record is cleared for an intentional retry.
 
