@@ -337,6 +337,35 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(second.message, "draft pull request already open")
             self.assertEqual(second.pr_url, "dry-run://draft-pr")
 
+    def test_abandoned_rerun_does_not_restart_work(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            record = store.ensure("owner/repo", 1)
+            record.transition(IssueState.ABANDONED)
+            record.blocked_on = "sandbox command failed"
+            store.upsert(record)
+            llm = SequencedLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.ABANDONED)
+            self.assertEqual(result.blocked_on, "sandbox command failed")
+            self.assertIn("clear the state record", result.message)
+            self.assertEqual(llm.triage_calls, 0)
+            self.assertFalse(config.work_root.exists())
+
     def test_budget_hit_pauses_in_waiting_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

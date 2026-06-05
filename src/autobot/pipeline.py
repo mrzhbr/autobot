@@ -13,6 +13,7 @@ from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr import build_pr_body
+from autobot.result import finish_process
 from autobot.review import ReviewerPanel, format_blockers
 from autobot.scanner import find_secret_like_values
 from autobot.state import StateStore
@@ -46,19 +47,32 @@ class IssueProcessor:
         record = self.store.ensure(repo, issue_number)
         ledger = CostLedger(record.cost)
 
+        if record.state == IssueState.ABANDONED:
+            return finish_process(
+                self.store,
+                record,
+                ledger,
+                "issue is abandoned; clear the state record before retrying",
+                None,
+                started,
+            )
+
         resumed = False
         previous_blocked_on = record.blocked_on
         if record.state == IssueState.WAITING:
             resumed = self._resume_if_answered(record, issue)
             if not resumed:
-                return self._finish(record, ledger, "waiting for a human answer", None, started)
+                return finish_process(
+                    self.store, record, ledger, "waiting for a human answer", None, started
+                )
 
         topics = detect_out_of_scope(issue)
         if resumed and topics and previous_blocked_on == "out_of_scope":
             record.blocked_on = "out_of_scope"
             record.transition(IssueState.WAITING)
             self.store.upsert(record)
-            return self._finish(
+            return finish_process(
+                self.store,
                 record,
                 ledger,
                 "still waiting on out-of-scope guardrail",
@@ -90,12 +104,13 @@ class IssueProcessor:
             try:
                 self._pause_if_budget_hit(issue, record, ledger, "triage")
             except resume.PausedForHuman as exc:
-                return self._finish(record, ledger, str(exc), None, started)
+                return finish_process(self.store, record, ledger, str(exc), None, started)
             if not triage.ready:
                 if resumed and previous_blocked_on == "clarification":
                     resume.mark_clarification_still_needed(record, triage.questions, triage.reason)
                     self.store.upsert(record)
-                    return self._finish(
+                    return finish_process(
+                        self.store,
                         record,
                         ledger,
                         "still needs clarification after reply",
@@ -107,18 +122,22 @@ class IssueProcessor:
             self.store.upsert(record)
 
         if record.state == IssueState.PR_OPEN:
-            return self._finish(record, ledger, "draft pull request already open", None, started)
+            return finish_process(
+                self.store, record, ledger, "draft pull request already open", None, started
+            )
 
         try:
             pr_url = self._implement_review_and_pr(issue, record, ledger, repo_dir)
         except resume.PausedForHuman as exc:
-            return self._finish(record, ledger, str(exc), None, started)
+            return finish_process(self.store, record, ledger, str(exc), None, started)
         except Exception as exc:
             record.transition(IssueState.ABANDONED)
             record.blocked_on = str(exc)
             self.store.upsert(record)
             raise
-        return self._finish(record, ledger, "opened draft pull request", pr_url, started)
+        return finish_process(
+            self.store, record, ledger, "opened draft pull request", pr_url, started
+        )
 
     def _clone_and_branch(self, issue: Issue, record: IssueRecord) -> Path:
         repo_dir = repo_work_dir(self.config.work_root, issue)
@@ -185,7 +204,9 @@ class IssueProcessor:
         self.store.upsert(record)
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
-        return self._finish(record, ledger, "paused for out-of-scope guardrail", None, started)
+        return finish_process(
+            self.store, record, ledger, "paused for out-of-scope guardrail", None, started
+        )
 
     def _ask_and_wait(
         self,
@@ -216,7 +237,8 @@ class IssueProcessor:
         record.blocked_on = "clarification"
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
-        return self._finish(
+        return finish_process(
+            self.store,
             record,
             ledger,
             "posted clarification and entered waiting",
@@ -373,28 +395,3 @@ class IssueProcessor:
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
         raise resume.PausedForHuman(text)
-
-    def _finish(
-        self,
-        record: IssueRecord,
-        ledger: CostLedger,
-        message: str,
-        pr_url: str | None,
-        started: float,
-    ) -> ProcessResult:
-        ledger.finish()
-        cost = ledger.to_dict()
-        cost["wall_seconds"] = round(time.monotonic() - started, 2)
-        record.cost = cost
-        self.store.upsert(record)
-        pr_url = pr_url or record.conversation.get("pr_url")
-        return ProcessResult(
-            state=record.state,
-            message=message,
-            pr_url=pr_url,
-            cost=cost,
-            branch=record.branch,
-            review_rounds=record.review_rounds,
-            files_touched=record.files_touched,
-            blocked_on=record.blocked_on,
-        )

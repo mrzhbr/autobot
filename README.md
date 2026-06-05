@@ -118,6 +118,8 @@ If `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS` is reached, the agent records a `bu
 
 If an issue appears to require authentication, cryptography, secrets handling, or database migrations, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
 
+If implementation or PR creation fails unexpectedly, the issue is marked `abandoned`; reruns return the stored blocked reason until the state record is cleared for an intentional retry.
+
 ## Adapters
 
 Implemented defaults:
