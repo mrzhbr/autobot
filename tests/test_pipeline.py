@@ -1097,14 +1097,18 @@ class PipelineTests(unittest.TestCase):
                 IssueComment(1, "alice", "Not enough detail.", "2026-06-05T00:01:00Z")
             )
             second = processor.process("owner/repo", 1)
+            third = processor.process("owner/repo", 1)
 
             self.assertEqual(first.state, IssueState.WAITING)
             self.assertEqual(second.state, IssueState.WAITING)
             self.assertEqual(second.message, "still needs clarification after reply")
+            self.assertEqual(third.state, IssueState.WAITING)
+            self.assertEqual(third.message, "waiting for a human answer")
             self.assertEqual(llm.triage_calls, 2)
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
             self.assertEqual(loaded.blocked_on, "clarification")
+            self.assertEqual(loaded.conversation["resume_after_comment_id"], 1)
             self.assertEqual(
                 loaded.conversation["clarification_after_resume"]["questions"],
                 ["Still unclear."],

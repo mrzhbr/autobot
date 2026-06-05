@@ -82,5 +82,9 @@ def mark_clarification_still_needed(
         "reason": reason,
         "at": utc_now(),
     }
+    replies = record.conversation.get("human_replies") or []
+    reply_ids = [int(reply.get("id") or 0) for reply in replies if isinstance(reply, dict)]
+    if reply_ids:
+        record.conversation["resume_after_comment_id"] = max(reply_ids)
     record.blocked_on = "clarification"
     record.transition(IssueState.WAITING)
