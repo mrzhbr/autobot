@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 
 from autobot.config import Config
 from autobot.github import GitHubIssueTracker
+from autobot.scanner import redact_secret_like_values
 
 
 @dataclass(frozen=True)
@@ -162,5 +163,5 @@ def _issue_check(
     try:
         issue_data = tracker_factory(config.github_token, config.agent_login).get(repo, issue)
     except Exception as exc:
-        return CheckResult("issue readable", "fail", str(exc))
+        return CheckResult("issue readable", "fail", redact_secret_like_values(str(exc)))
     return CheckResult("issue readable", "pass", f"{issue_data.repo}#{issue_data.number}")

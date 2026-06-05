@@ -119,7 +119,9 @@ class GitHubIssueTracker:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             payload = exc.read().decode("utf-8", errors="replace")
-            message = f"GitHub {method} {path} failed: {exc.code} {payload}"
+            message = redact_secret_like_values(
+                f"GitHub {method} {path} failed: {exc.code} {payload}"
+            )
             raise GitHubError(message, status_code=exc.code) from exc
 
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -160,6 +162,26 @@ class GitHubSafetyTests(unittest.TestCase):
             self.assertRaises(GitHubError) as raised,
         ):
             host.push("owner/repo", Path("/tmp/repo"), "autobot/issue-1")
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
+
+    def test_http_errors_redact_token_like_payloads(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        error = urllib.error.HTTPError(
+            "https://api.github.com/repos/owner/repo",
+            403,
+            "Forbidden",
+            {},
+            io.BytesIO(f'{{"message":"bad {token}"}}'.encode()),
+        )
+        tracker = GitHubIssueTracker(token, "bot")
+
+        with (
+            patch("autobot.github.urllib.request.urlopen", side_effect=error),
+            self.assertRaises(GitHubError) as raised,
+        ):
+            tracker.get("owner/repo", 1)
 
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
