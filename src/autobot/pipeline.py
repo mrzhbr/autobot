@@ -276,6 +276,7 @@ class IssueProcessor:
         merge = merge_verification_commands
         all_changes = [*test_plan.changes, *plan.changes]
         impl_commands = list(plan.test_commands)
+        sandbox_ops.ensure_no_secret_commands([*test_plan.test_commands, *impl_commands])
         record.plan = {
             "acceptance_tests": test_plan.plan,
             "acceptance_test_baseline": baseline,
@@ -288,6 +289,7 @@ class IssueProcessor:
         sandbox_ops.apply_changes(repo_dir, sandbox, plan.changes, dry_run)
         detected = detect_verification_commands(repo_dir, self.config.default_test_command)
         verification_commands = merge(test_plan.test_commands, impl_commands, detected)
+        sandbox_ops.ensure_no_secret_commands(verification_commands)
         record.plan["verification_commands"] = verification_commands
         self.store.upsert(record)
         test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
@@ -319,6 +321,7 @@ class IssueProcessor:
             impl_commands.extend(fix.test_commands)
             sandbox_ops.apply_changes(repo_dir, sandbox, fix.changes, dry_run)
             verification_commands = merge(test_plan.test_commands, impl_commands, detected)
+            sandbox_ops.ensure_no_secret_commands(verification_commands)
             record.plan["verification_commands"] = verification_commands
             self.store.upsert(record)
             test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)

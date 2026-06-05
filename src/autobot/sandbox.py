@@ -144,7 +144,7 @@ def apply_changes(
 
 
 def run_verification(sandbox: DockerSandbox, commands: list[str], dry_run: bool) -> str:
-    _ensure_no_secret_commands(commands)
+    ensure_no_secret_commands(commands)
     output: list[str] = []
     for command in commands:
         if dry_run:
@@ -159,7 +159,7 @@ def run_verification_allow_failure(
     commands: list[str],
     dry_run: bool,
 ) -> dict:
-    _ensure_no_secret_commands(commands)
+    ensure_no_secret_commands(commands)
     output: list[str] = []
     ok = True
     for command in commands:
@@ -185,7 +185,7 @@ def _ensure_no_secret_changes(changes: list[FileChange]) -> None:
         raise SandboxError(f"secret-like values found in proposed changes: {count} finding(s)")
 
 
-def _ensure_no_secret_commands(commands: list[str]) -> None:
+def ensure_no_secret_commands(commands: list[str]) -> None:
     if secrets := find_secret_like_values("\n".join(commands)):
         count = len(secrets)
         raise SandboxError(f"secret-like values found in verification commands: {count} finding(s)")
