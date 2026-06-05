@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from autobot.audit import AuditLog
 from autobot.chat import IssueCommentChat
@@ -81,6 +83,13 @@ class FakeGitHost:
 
     def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         return "https://github.test/pull/1"
+
+
+class PackageLockGitHost(FakeGitHost):
+    def clone(self, repo: str, target_dir: Path) -> None:
+        super().clone(repo, target_dir)
+        (target_dir / "package.json").write_text("{}", encoding="utf-8")
+        (target_dir / "package-lock.json").write_text("{}", encoding="utf-8")
 
 
 class SequencedLLM:
@@ -321,6 +330,30 @@ class PipelineTests(unittest.TestCase):
                     "python -m unittest discover -s tests",
                 ],
             )
+
+    def test_live_pipeline_uses_detected_sandbox_setup_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=PackageLockGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with patch("autobot.sandbox.subprocess.run", return_value=completed) as run:
+                result = processor.process("owner/repo", 1)
+
+            first_docker_command = run.call_args_list[0].args[0]
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(first_docker_command[-1], "npm ci")
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

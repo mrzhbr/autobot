@@ -244,10 +244,13 @@ class IssueProcessor:
         record.transition(IssueState.IMPLEMENTING)
         self.store.upsert(record)
         dry_run = self.config.dry_run
+        setup_command = sandbox_ops.detect_setup_command(
+            repo_dir, self.config.sandbox_setup_command
+        )
         sandbox = sandbox_ops.DockerSandbox(
             repo_dir,
             self.config.sandbox_image,
-            self.config.sandbox_setup_command,
+            setup_command,
             self.config.sandbox_network,
         )
         if not dry_run:

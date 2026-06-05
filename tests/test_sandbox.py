@@ -8,10 +8,44 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from autobot.models import FileChange
-from autobot.sandbox import DockerSandbox, LocalSandbox
+from autobot.sandbox import DockerSandbox, LocalSandbox, detect_setup_command
 
 
 class SandboxTests(unittest.TestCase):
+    def test_detect_setup_command_uses_common_stack_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            python_repo = root / "python"
+            node_repo = root / "node"
+            go_repo = root / "go"
+            rust_repo = root / "rust"
+            for repo in (python_repo, node_repo, go_repo, rust_repo):
+                repo.mkdir()
+            (python_repo / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+            (python_repo / "requirements-dev.txt").write_text("pytest\n", encoding="utf-8")
+            (node_repo / "package.json").write_text("{}", encoding="utf-8")
+            (node_repo / "package-lock.json").write_text("{}", encoding="utf-8")
+            (go_repo / "go.mod").write_text("module example.test/demo\n", encoding="utf-8")
+            (rust_repo / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+
+            python_setup = (
+                'python -m pip install -r requirements-dev.txt && python -m pip install -e ".[dev]"'
+            )
+            self.assertEqual(
+                detect_setup_command(python_repo, None),
+                python_setup,
+            )
+            self.assertEqual(detect_setup_command(node_repo, None), "npm ci")
+            self.assertEqual(detect_setup_command(go_repo, None), "go mod download")
+            self.assertEqual(detect_setup_command(rust_repo, None), "cargo fetch")
+
+    def test_detect_setup_command_prefers_explicit_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "package.json").write_text("{}", encoding="utf-8")
+
+            self.assertEqual(detect_setup_command(repo, "make bootstrap"), "make bootstrap")
+
     def test_docker_run_uses_configured_network_and_work_mount(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

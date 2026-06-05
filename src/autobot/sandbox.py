@@ -12,6 +12,20 @@ class SandboxError(RuntimeError):
     pass
 
 
+def detect_setup_command(repo_dir: Path, configured: str | None) -> str | None:
+    if configured:
+        return configured
+    if _has_python_setup(repo_dir):
+        return _python_setup(repo_dir)
+    if (repo_dir / "package.json").exists():
+        return _node_setup(repo_dir)
+    if (repo_dir / "go.mod").exists():
+        return "go mod download"
+    if (repo_dir / "Cargo.toml").exists():
+        return "cargo fetch"
+    return None
+
+
 class DockerSandbox:
     def __init__(
         self,
@@ -153,3 +167,37 @@ def run_verification_allow_failure(
             ok = False
             output.append(f"$ {command}\n{exc}")
     return {"ok": ok, "output": "\n\n".join(output)}
+
+
+def _has_python_setup(repo_dir: Path) -> bool:
+    return any(
+        (repo_dir / name).exists()
+        for name in (
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "requirements-dev.txt",
+            "requirements.txt",
+        )
+    )
+
+
+def _python_setup(repo_dir: Path) -> str:
+    commands = []
+    if (repo_dir / "requirements-dev.txt").exists():
+        commands.append("python -m pip install -r requirements-dev.txt")
+    elif (repo_dir / "requirements.txt").exists():
+        commands.append("python -m pip install -r requirements.txt")
+    if any((repo_dir / name).exists() for name in ("pyproject.toml", "setup.py", "setup.cfg")):
+        commands.append('python -m pip install -e ".[dev]"')
+    return " && ".join(commands)
+
+
+def _node_setup(repo_dir: Path) -> str:
+    if (repo_dir / "pnpm-lock.yaml").exists():
+        return "corepack enable && pnpm install --frozen-lockfile"
+    if (repo_dir / "yarn.lock").exists():
+        return "corepack enable && yarn install --frozen-lockfile"
+    if (repo_dir / "package-lock.json").exists() or (repo_dir / "npm-shrinkwrap.json").exists():
+        return "npm ci"
+    return "npm install"
