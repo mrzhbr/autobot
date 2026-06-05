@@ -133,6 +133,7 @@ The prototype enforces these guardrails:
 - Refuses to push default-like branches such as `main` and `master`.
 - Does not force-push.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
+- Asks the LLM to author acceptance-test changes before implementation, then runs authored, implementation, and detected verification commands.
 - Scans the final diff for common secret-like values before commit and PR creation.
 - Caps issue comments per run with `COMMENT_LIMIT_PER_RUN`.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.

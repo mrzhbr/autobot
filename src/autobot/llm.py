@@ -54,6 +54,19 @@ class MockLLM:
             test_commands=["python -m unittest discover -s tests || true"],
         )
 
+    def write_tests(self, issue: Issue, context: list[ContextFile]) -> ImplementationPlan:
+        content = (
+            "from pathlib import Path\n\n\n"
+            "def test_issue_marker_present():\n"
+            "    readme = Path('README.md').read_text(encoding='utf-8')\n"
+            f"    assert 'Autobot touched issue #{issue.number}' in readme\n"
+        )
+        return ImplementationPlan(
+            plan=["Add a smoke acceptance test for the issue marker."],
+            changes=[FileChange(path=f"tests/test_issue_{issue.number}.py", content=content)],
+            test_commands=["python -m pytest"],
+        )
+
     def review(
         self,
         lens: str,
@@ -118,6 +131,31 @@ class HttpLLM:
                 action=item.action,
                 content=item.content,
             )
+            for item in payload.changes
+        ]
+        return ImplementationPlan(
+            plan=payload.plan,
+            changes=changes,
+            test_commands=payload.test_commands,
+            usage=usage,
+        )
+
+    def write_tests(self, issue: Issue, context: list[ContextFile]) -> ImplementationPlan:
+        prompt = (
+            "You are the test author for a GitHub issue. Write acceptance tests derived "
+            "only from the issue, comments, and repo conventions. Return strict JSON with "
+            "keys: plan array of strings, changes array, test_commands array. Each change "
+            "has path, action write/delete, and content. For writes, provide complete file "
+            "content, not patches. Do not implement product code.\n\n"
+            f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
+            f"Repo context:\n{format_context(context)}"
+        )
+        data, usage = self._json_call("test", self.config.implement_model, prompt)
+        from autobot.schemas import ImplementationPayload
+
+        payload = ImplementationPayload.model_validate(data)
+        changes = [
+            FileChange(path=item.path, action=item.action, content=item.content)
             for item in payload.changes
         ]
         return ImplementationPlan(

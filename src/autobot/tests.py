@@ -8,6 +8,16 @@ def detect_test_commands(repo_dir: Path, configured: str | None) -> list[str]:
     return detect_verification_commands(repo_dir, configured).tests
 
 
+def merge_verification_commands(
+    authored_tests: list[str],
+    implementation_tests: list[str],
+    detected: VerificationCommands,
+) -> list[str]:
+    tests = [*authored_tests, *(implementation_tests or detected.tests)]
+    tests = list(dict.fromkeys(tests))
+    return [*tests, *detected.lint, *detected.types]
+
+
 class VerificationCommands:
     def __init__(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from autobot import resume
 from autobot.adapters import LLM, ChatChannel, GitHost, IssueTracker
 from autobot.audit import AuditLog
 from autobot.config import Config
@@ -11,16 +12,11 @@ from autobot.cost import CostLedger
 from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr import build_pr_body
-from autobot.resume import (
-    PausedForHuman,
-    mark_clarification_still_needed,
-    resume_after_comment_id,
-)
 from autobot.review import ReviewerPanel, format_blockers
 from autobot.sandbox import DockerSandbox, apply_changes, run_verification
 from autobot.scanner import find_secret_like_values
 from autobot.state import StateStore
-from autobot.tests import detect_verification_commands
+from autobot.tests import detect_verification_commands, merge_verification_commands
 from autobot.workspace import branch_name, changed_files, prepare_dry_run_repo, repo_work_dir
 
 
@@ -93,11 +89,11 @@ class IssueProcessor:
             self.store.upsert(record)
             try:
                 self._pause_if_budget_hit(issue, record, ledger, "triage")
-            except PausedForHuman as exc:
+            except resume.PausedForHuman as exc:
                 return self._finish(record, ledger, str(exc), None, started)
             if not triage.ready:
                 if resumed and previous_blocked_on == "clarification":
-                    mark_clarification_still_needed(record, triage.questions, triage.reason)
+                    resume.mark_clarification_still_needed(record, triage.questions, triage.reason)
                     self.store.upsert(record)
                     return self._finish(
                         record,
@@ -115,7 +111,7 @@ class IssueProcessor:
 
         try:
             pr_url = self._implement_review_and_pr(issue, record, ledger, repo_dir)
-        except PausedForHuman as exc:
+        except resume.PausedForHuman as exc:
             return self._finish(record, ledger, str(exc), None, started)
         except Exception as exc:
             record.transition(IssueState.ABANDONED)
@@ -138,7 +134,7 @@ class IssueProcessor:
         return repo_dir
 
     def _resume_if_answered(self, record: IssueRecord, issue: Issue) -> bool:
-        resume_after = resume_after_comment_id(record)
+        resume_after = resume.resume_after_comment_id(record)
         bot = self.config.agent_login
         replies = [
             {
@@ -248,13 +244,22 @@ class IssueProcessor:
             self.audit.record("label", issue.repo, issue.number, {"label": "agent-working"})
             sandbox.prepare()
 
+        test_plan = self.llm.write_tests(issue, gather_context(repo_dir, issue))
+        ledger.add(test_plan.usage)
+        self._pause_if_budget_hit(issue, record, ledger, "test authoring")
+        if not test_plan.changes:
+            raise RuntimeError("test author returned no changes")
+        apply_changes(repo_dir, sandbox, test_plan.changes, self.config.dry_run)
+
         plan = self.llm.implement(issue, gather_context(repo_dir, issue))
         ledger.add(plan.usage)
         self._pause_if_budget_hit(issue, record, ledger, "implementation")
         if not plan.changes:
             raise RuntimeError("implementer returned no changes")
         record.plan = {
+            "acceptance_tests": test_plan.plan,
             "plan": plan.plan,
+            "test_author_commands": test_plan.test_commands,
             "test_commands": plan.test_commands,
             "at": utc_now(),
         }
@@ -264,9 +269,9 @@ class IssueProcessor:
             repo_dir,
             self.config.default_test_command,
         )
-        verification_commands = [*(plan.test_commands or detected_commands.tests)]
-        verification_commands.extend(detected_commands.lint)
-        verification_commands.extend(detected_commands.types)
+        verification_commands = merge_verification_commands(
+            test_plan.test_commands, plan.test_commands, detected_commands
+        )
         record.plan["verification_commands"] = verification_commands
         self.store.upsert(record)
         test_output = run_verification(sandbox, verification_commands, self.config.dry_run)
@@ -301,7 +306,7 @@ class IssueProcessor:
         if secrets:
             raise RuntimeError(f"secret-like values found in diff: {secrets[:3]}")
         if self.config.dry_run:
-            record.files_touched = [change.path for change in plan.changes]
+            record.files_touched = [change.path for change in [*test_plan.changes, *plan.changes]]
             record.conversation["ci_status"] = {"state": "dry-run"}
             record.conversation["pr_url"] = "dry-run://draft-pr"
             record.transition(IssueState.PR_OPEN)
@@ -364,7 +369,7 @@ class IssueProcessor:
             record.conversation["resume_after_comment_id"] = comment_id
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
-        raise PausedForHuman(text)
+        raise resume.PausedForHuman(text)
 
     def _finish(
         self,

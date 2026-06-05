@@ -69,6 +69,9 @@ class LLM(Protocol):
     ) -> ImplementationPlan:
         """Return a concrete plan, full-file changes, and test commands."""
 
+    def write_tests(self, issue: Issue, context: list[ContextFile]) -> ImplementationPlan:
+        """Return acceptance-test changes derived from the issue spec."""
+
     def review(
         self,
         lens: str,

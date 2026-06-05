@@ -61,6 +61,7 @@ class FakeTracker:
 class SequencedLLM:
     def __init__(self) -> None:
         self.triage_calls = 0
+        self.test_author_calls = 0
 
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
         self.triage_calls += 1
@@ -78,6 +79,19 @@ class SequencedLLM:
             plan=["Write the clarified behavior into README.md."],
             changes=[FileChange("README.md", "# Dry run repo\n\nImplemented.\n")],
             test_commands=["true"],
+        )
+
+    def write_tests(self, issue: Issue, context: list[ContextFile]) -> ImplementationPlan:
+        self.test_author_calls += 1
+        return ImplementationPlan(
+            plan=["Write acceptance test."],
+            changes=[
+                FileChange(
+                    f"tests/test_issue_{issue.number}.py",
+                    "def test_acceptance():\n    assert True\n",
+                )
+            ],
+            test_commands=["python -m pytest"],
         )
 
     def review(
@@ -134,9 +148,10 @@ class PipelineTests(unittest.TestCase):
 
             self.assertEqual(second.state, IssueState.PR_OPEN)
             self.assertEqual(second.pr_url, "dry-run://draft-pr")
-            self.assertEqual(second.files_touched, ["README.md"])
+            self.assertEqual(second.files_touched, ["tests/test_issue_1.py", "README.md"])
             self.assertTrue(second.branch.startswith("autobot/issue-1-"))
             self.assertEqual(second.review_rounds, 1)
+            self.assertEqual(llm.test_author_calls, 1)
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
             self.assertEqual(loaded.conversation["human_replies"][0]["author"], "alice")
@@ -146,7 +161,8 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertEqual(loaded.conversation["pr_url"], "dry-run://draft-pr")
             self.assertEqual(loaded.conversation["ci_status"]["state"], "dry-run")
-            self.assertEqual(loaded.plan["verification_commands"], ["true"])
+            self.assertEqual(loaded.plan["acceptance_tests"], ["Write acceptance test."])
+            self.assertEqual(loaded.plan["verification_commands"], ["python -m pytest", "true"])
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
