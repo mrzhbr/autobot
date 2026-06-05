@@ -70,6 +70,14 @@ class IssueProcessor:
                 return finish_process(self.store, record, ledger, waiting_message, None, started)
             self.store.upsert(record)
 
+        try:
+            self._pause_if_budget_hit(issue, record, ledger, "run start")
+        except resume.PausedForHuman as exc:
+            return finish_process(self.store, record, ledger, str(exc), None, started)
+        except Exception as exc:
+            message = abandon_process(self.store, record, ledger, exc, started)
+            raise RuntimeError(message) from exc
+
         topics = detect_out_of_scope(issue)
         if resumed and topics and previous_blocked_on == "out_of_scope":
             record.blocked_on = "out_of_scope"
