@@ -266,6 +266,8 @@ class GitHubSafetyTests(unittest.TestCase):
             host.create_branch(Path("/tmp/repo"), "main")
         with self.assertRaisesRegex(GitHubError, "protected default-like branch"):
             host.push("owner/repo", Path("/tmp/repo"), "master")
+        with self.assertRaisesRegex(GitHubError, "protected default-like branch"):
+            host.push("owner/repo", Path("/tmp/repo"), "refs/heads/main")
 
         self.assertEqual(host.commands, [])
 
@@ -428,6 +430,17 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertEqual(body["head"], "autobot/issue-1")
         self.assertEqual(body["base"], "main")
         self.assertEqual(body["draft"], True)
+
+    def test_open_pull_request_refuses_default_like_head_branch(self) -> None:
+        host = RecordingGitHost()
+
+        with (
+            patch("autobot.github.GitHubIssueTracker", RecordingTracker),
+            self.assertRaisesRegex(GitHubError, "protected default-like branch"),
+        ):
+            host.open_draft_pr("owner/repo", "main", "Draft: title", "body")
+
+        self.assertEqual(RecordingTracker.requests, [])
 
     def test_open_pull_request_payload_redacts_token_like_values(self) -> None:
         token = "ghp_" + ("A" * 36)

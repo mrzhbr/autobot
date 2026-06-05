@@ -223,7 +223,7 @@ class GitHubGitHost:
         self._run(cmd)
 
     def create_branch(self, repo_dir: Path, branch: str) -> None:
-        if branch in DEFAULT_BRANCHES:
+        if _is_default_like_branch(branch):
             raise GitHubError(f"refusing to work on protected default-like branch: {branch}")
         self._git(repo_dir, ["checkout", "-B", branch])
 
@@ -255,11 +255,13 @@ class GitHubGitHost:
         return True
 
     def push(self, repo: str, repo_dir: Path, branch: str) -> None:
-        if branch in DEFAULT_BRANCHES:
+        if _is_default_like_branch(branch):
             raise GitHubError(f"refusing to push protected default-like branch: {branch}")
         self._git(repo_dir, self._auth_config() + ["push", "origin", branch])
 
     def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
+        if _is_default_like_branch(branch):
+            raise GitHubError(f"refusing to open PR from protected default-like branch: {branch}")
         default_branch = self._default_branch(repo)
         tracker = GitHubIssueTracker(self.token, None)
         try:
@@ -384,3 +386,11 @@ def _summarize_check_run(run: dict) -> dict:
         "conclusion": run.get("conclusion"),
         "html_url": run.get("html_url"),
     }
+
+
+def _is_default_like_branch(branch: str) -> bool:
+    candidates = [branch]
+    for separator in (":", "/", "refs/heads/"):
+        if separator in branch:
+            candidates.append(branch.rsplit(separator, 1)[-1])
+    return any(candidate in DEFAULT_BRANCHES for candidate in candidates)

@@ -187,7 +187,7 @@ The prototype enforces these guardrails:
 
 - Opens draft PRs only.
 - Fails fast before live processing when required GitHub or LLM credentials are missing.
-- Refuses to push default-like branches such as `main` and `master`.
+- Refuses to push or open PRs from default-like branches such as `main`, `master`, and protected ref forms.
 - Does not force-push.
 - Resets reused live clones to the remote default branch and removes ignored files before creating the issue branch.
 - Stops before committing if Git cannot reliably inspect the staged diff.
