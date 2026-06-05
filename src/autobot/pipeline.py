@@ -73,18 +73,24 @@ class IssueProcessor:
         previous_blocked_on = record.blocked_on
         if record.state == IssueState.WAITING:
             if record.blocked_on == "comment_limit":
-                return self._resume_comment_limit_pause(issue, record, ledger, started)
-            resumed, waiting_message = resume.resume_waiting(
-                record,
-                issue,
-                self.config.agent_login,
-                ledger,
-                self.config.max_issue_tokens,
-                self.config.max_issue_dollars,
-            )
-            if not resumed:
-                return finish_process(self.store, record, ledger, waiting_message, None, started)
-            self.store.upsert(record)
+                result = self._resume_comment_limit_pause(issue, record, ledger, started)
+                if result is not None:
+                    return result
+                resumed = True
+            else:
+                resumed, waiting_message = resume.resume_waiting(
+                    record,
+                    issue,
+                    self.config.agent_login,
+                    ledger,
+                    self.config.max_issue_tokens,
+                    self.config.max_issue_dollars,
+                )
+                if not resumed:
+                    return finish_process(
+                        self.store, record, ledger, waiting_message, None, started
+                    )
+                self.store.upsert(record)
 
         topics = detect_out_of_scope(issue)
         if resumed and topics and previous_blocked_on == "out_of_scope":
@@ -296,7 +302,11 @@ class IssueProcessor:
         record: IssueRecord,
         ledger: CostLedger,
         started: float,
-    ) -> ProcessResult:
+    ) -> ProcessResult | None:
+        if resume.resume_if_answered(record, issue, self.config.agent_login):
+            record.conversation.pop("comment_limit_pause", None)
+            self.store.upsert(record)
+            return None
         if self.comments_this_run >= self.config.comment_limit:
             return finish_process(
                 self.store,

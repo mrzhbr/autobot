@@ -1470,6 +1470,43 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.conversation["asked_comment_id"], 1)
             self.assertNotIn("comment_limit_pause", loaded.conversation)
 
+    def test_comment_limit_pause_resumes_from_human_reply_before_posting_question(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = replace(
+                Config.from_env(root=root, dry_run=True, mock_llm=True),
+                comment_limit=0,
+            )
+            tracker = FakeTracker()
+            store = StateStore(config.db_path)
+            llm = CommentAwareLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = processor.process("owner/repo", 1)
+            tracker.comments.append(
+                IssueComment(1, "alice", "Use the compact option.", "2026-06-05T00:01:00Z")
+            )
+            second = processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(first.message, "waiting for outbound comment capacity")
+            self.assertEqual(second.state, IssueState.PR_OPEN)
+            self.assertEqual(second.pr_url, "dry-run://draft-pr")
+            self.assertEqual([comment.author for comment in tracker.comments], ["alice"])
+            self.assertEqual(llm.triage_calls, 2)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.conversation["human_replies"][0]["id"], 1)
+            self.assertNotIn("comment_limit_pause", loaded.conversation)
+
     def test_comment_limit_resets_for_each_processed_issue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
