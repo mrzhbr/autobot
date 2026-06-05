@@ -130,7 +130,7 @@ If `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS` is reached, the agent records a `bu
 
 If an issue title or body appears to require authentication, cryptography, secrets handling, or database migrations, or if the issue text or comments contain raw secret-like values, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
 
-If implementation or PR creation fails unexpectedly, the issue is marked `abandoned`; reruns return the stored blocked reason until the state record is cleared for an intentional retry.
+If processing fails unexpectedly before the agent reaches a human-waiting or PR state, the issue is marked `abandoned`; reruns return the stored blocked reason until the state record is cleared for an intentional retry.
 
 If a draft PR is already recorded in state, reruns return the stored PR URL before cloning the repository again.
 
