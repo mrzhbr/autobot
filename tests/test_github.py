@@ -294,6 +294,21 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_commit_all_raises_on_cached_diff_errors_before_committing(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        host = RecordingGitHost()
+        failed = SimpleNamespace(returncode=2, stdout="", stderr=f"fatal: {token}\n")
+
+        with (
+            patch("autobot.github.subprocess.run", return_value=failed),
+            self.assertRaises(GitHubError) as raised,
+        ):
+            host.commit_all(Path("/tmp/repo"), "feat: change")
+
+        self.assertEqual(host.commands, [["git", "add", "-A"]])
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
+
     def test_http_errors_redact_token_like_payloads(self) -> None:
         token = "ghp_" + ("A" * 36)
         error = urllib.error.HTTPError(

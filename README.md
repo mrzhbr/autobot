@@ -164,6 +164,7 @@ The prototype enforces these guardrails:
 - Refuses to push default-like branches such as `main` and `master`.
 - Does not force-push.
 - Resets reused live clones to the remote default branch before creating the issue branch.
+- Stops before committing if Git cannot reliably inspect the staged diff.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
 - Mirrors Docker file writes and directory deletes in dry-run mode.
 - Rejects secret-like values in configured sandbox setup commands before Docker execution.

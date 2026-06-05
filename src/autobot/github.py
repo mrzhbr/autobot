@@ -242,6 +242,9 @@ class GitHubGitHost:
         )
         if quiet.returncode == 0:
             return False
+        if quiet.returncode > 1:
+            message = redact_secret_like_values((quiet.stderr or quiet.stdout).strip())
+            raise GitHubError(message or "git diff failed")
         self._git(repo_dir, ["commit", "-m", message])
         return True
 
