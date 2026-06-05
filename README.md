@@ -118,7 +118,7 @@ If triage returns `ready: false`, the agent posts one comment with up to three q
 
 If `MAX_ISSUE_TOKENS` or `MAX_ISSUE_DOLLARS` is reached, the agent records a `budget_pause`, moves the issue to `waiting`, and posts one human-facing notification in live mode. Rerun after increasing the budget or changing the issue state; no additional issue comment is required when the new budget allows progress.
 
-If an issue appears to require authentication, cryptography, secrets handling, or database migrations, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
+If an issue title or body appears to require authentication, cryptography, secrets handling, or database migrations, or if the issue text or comments contain raw secret-like values, the agent pauses in `waiting` and asks for human ownership or a narrowed non-sensitive scope.
 
 If implementation or PR creation fails unexpectedly, the issue is marked `abandoned`; reruns return the stored blocked reason until the state record is cleared for an intentional retry.
 
@@ -147,7 +147,7 @@ The prototype enforces these guardrails:
 - Resets reused live clones to the remote default branch before creating the issue branch.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
-- Scans the final diff for common secret-like values, including raw provider tokens, before commit and PR creation.
+- Scans issue text before triage and final diffs before commit/PR creation for common secret-like values, including raw provider tokens.
 - Redacts token-like values from CLI, GitHub command, GitHub HTTP, LLM provider, doctor issue-read, abandoned-state, verification-output, PR body, audit, and issue-comment messages.
 - Caps issue comments per processed issue with `COMMENT_LIMIT_PER_RUN`.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.

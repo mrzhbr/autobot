@@ -652,6 +652,39 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertIn("authentication", loaded.conversation["guardrail_pause"]["topics"])
 
+    def test_raw_secret_like_issue_comment_pauses_before_triage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            token = "ghp_" + ("A" * 36)
+            tracker = FakeTracker(
+                title="Update docs",
+                body="Please document the demo behavior.",
+            )
+            tracker.comments.append(
+                IssueComment(1, "alice", f"Use {token}", "2026-06-05T00:01:00Z")
+            )
+            store = StateStore(config.db_path)
+            llm = SequencedLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.WAITING)
+            self.assertEqual(result.blocked_on, "out_of_scope")
+            self.assertEqual(llm.triage_calls, 0)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertIn("secrets handling", loaded.conversation["guardrail_pause"]["topics"])
+
     def test_waiting_guardrail_ignores_comments_before_pause(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
