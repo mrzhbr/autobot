@@ -50,14 +50,20 @@ def _watch(args: argparse.Namespace) -> int:
     tracker = GitHubIssueTracker(config.github_token, config.agent_login)
     processor = _processor(config, tracker=tracker)
     while True:
+        failed = False
         numbers = tracker.list_actionable(args.repo)
         if not numbers:
             print(json.dumps({"repo": args.repo, "state": "idle", "actionable": 0}))
         for number in numbers:
-            result = processor.process(args.repo, number)
-            print(json.dumps(_summary(args.repo, number, result), sort_keys=True))
+            try:
+                result = processor.process(args.repo, number)
+                payload = _summary(args.repo, number, result)
+            except Exception as exc:
+                failed = True
+                payload = _error_summary(args.repo, number, exc)
+            print(json.dumps(payload, sort_keys=True))
         if args.once:
-            return 0
+            return 1 if failed else 0
         time.sleep(args.interval)
 
 
@@ -95,6 +101,15 @@ def _summary(repo: str, issue: int, result) -> dict:
         "files_touched": result.files_touched,
         "verification_commands": result.verification_commands,
         "cost": result.cost,
+    }
+
+
+def _error_summary(repo: str, issue: int, exc: Exception) -> dict:
+    return {
+        "repo": repo,
+        "issue": issue,
+        "state": "error",
+        "message": redact_secret_like_values(str(exc)),
     }
 
 

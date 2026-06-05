@@ -19,11 +19,14 @@ class FakeWatchTracker:
 
 
 class FakeWatchProcessor:
-    def __init__(self) -> None:
+    def __init__(self, failures: dict[int, Exception] | None = None) -> None:
         self.calls: list[tuple[str, int]] = []
+        self.failures = failures or {}
 
     def process(self, repo: str, issue_number: int) -> ProcessResult:
         self.calls.append((repo, issue_number))
+        if issue_number in self.failures:
+            raise self.failures[issue_number]
         return ProcessResult(
             state=IssueState.PR_OPEN,
             message="opened draft pull request",
@@ -126,6 +129,28 @@ class CliTests(unittest.TestCase):
         self.assertTrue(
             all(line["verification_commands"] == ["python -m pytest"] for line in lines)
         )
+
+    def test_watch_once_continues_after_issue_failure(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        tracker = FakeWatchTracker([2, 3])
+        processor = FakeWatchProcessor({2: RuntimeError(f"failed with {token}")})
+
+        with (
+            patch("autobot.cli.GitHubIssueTracker", return_value=tracker),
+            patch("autobot.cli._processor", return_value=processor),
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            code = cli.main(["watch", "--repo", "owner/repo", "--once", "--dry-run"])
+
+        lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual(code, 1)
+        self.assertEqual(processor.calls, [("owner/repo", 2), ("owner/repo", 3)])
+        self.assertEqual(lines[0]["state"], "error")
+        self.assertEqual(lines[0]["issue"], 2)
+        self.assertNotIn(token, lines[0]["message"])
+        self.assertIn("[redacted-secret]", lines[0]["message"])
+        self.assertEqual(lines[1]["state"], "pr_open")
+        self.assertEqual(lines[1]["issue"], 3)
 
     def test_watch_once_reports_idle_when_no_actionable_issues(self) -> None:
         tracker = FakeWatchTracker([])

@@ -80,6 +80,10 @@ Poll continuously:
 ./cli watch --repo owner/name --interval 60
 ```
 
+Within a poll, `watch` isolates per-issue failures: it prints a redacted JSON error row
+for the failed issue and continues with the remaining actionable issues. `--once`
+returns nonzero if any issue in that poll failed.
+
 Check live-run prerequisites without posting comments, pushing branches, or opening PRs:
 
 ```sh
