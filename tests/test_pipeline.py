@@ -175,6 +175,7 @@ class SequencedLLM:
 
 class BudgetLLM(SequencedLLM):
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
+        self.triage_calls += 1
         return TriageDecision(
             ready=True,
             questions=[],
@@ -762,6 +763,45 @@ class PipelineTests(unittest.TestCase):
             loaded = StateStore(high_budget.db_path).get("owner/repo", 1)
             assert loaded is not None
             self.assertIn("budget_resumed_at", loaded.conversation)
+
+    def test_budget_pause_ignores_comment_until_budget_is_raised(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = replace(
+                Config.from_env(root=root, dry_run=True, mock_llm=True),
+                max_issue_tokens=1,
+            )
+            tracker = FakeTracker()
+            store = StateStore(config.db_path)
+            first_processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=BudgetLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = first_processor.process("owner/repo", 1)
+            tracker.comments.append(
+                IssueComment(1, "alice", "Please continue.", "2026-06-05T00:01:00Z")
+            )
+            second_llm = BudgetLLM()
+            second = IssueProcessor(
+                config=config,
+                store=StateStore(config.db_path),
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=second_llm,
+                audit=AuditLog(config.audit_path),
+            ).process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(second.message, "waiting for budget increase")
+            self.assertEqual(second_llm.triage_calls, 0)
 
     def test_comment_limit_blocks_guardrail_comment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

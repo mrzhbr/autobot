@@ -37,6 +37,23 @@ def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bo
     return True
 
 
+def resume_waiting(
+    record: IssueRecord,
+    issue: Issue,
+    bot: str | None,
+    ledger: CostLedger,
+    max_tokens: int | None,
+    max_dollars: float | None,
+) -> tuple[bool, str]:
+    if record.blocked_on == "budget":
+        if resume_if_budget_allows(record, ledger, max_tokens, max_dollars):
+            return True, ""
+        return False, "waiting for budget increase"
+    if resume_if_answered(record, issue, bot):
+        return True, ""
+    return False, "waiting for a human answer"
+
+
 def resume_if_budget_allows(
     record: IssueRecord,
     ledger: CostLedger,

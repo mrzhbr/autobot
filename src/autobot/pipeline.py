@@ -62,18 +62,16 @@ class IssueProcessor:
         resumed = False
         previous_blocked_on = record.blocked_on
         if record.state == IssueState.WAITING:
-            resumed = resume.resume_if_answered(
-                record, issue, self.config.agent_login
-            ) or resume.resume_if_budget_allows(
+            resumed, waiting_message = resume.resume_waiting(
                 record,
+                issue,
+                self.config.agent_login,
                 ledger,
                 self.config.max_issue_tokens,
                 self.config.max_issue_dollars,
             )
             if not resumed:
-                return finish_process(
-                    self.store, record, ledger, "waiting for a human answer", None, started
-                )
+                return finish_process(self.store, record, ledger, waiting_message, None, started)
             self.store.upsert(record)
 
         topics = detect_out_of_scope(issue)
