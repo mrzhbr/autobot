@@ -24,6 +24,17 @@ class LLMError(RuntimeError):
     pass
 
 
+ENGINEERING_DISCIPLINE = """
+Engineering rules:
+- Plan before writing: return a short, dependency-ordered plan.
+- Reuse existing project patterns and helpers before adding anything new.
+- Keep the diff small and limited to the requested issue.
+- Ship tests with behavior changes, and include test, lint, or type commands.
+- Keep every source file at or below 400 lines and avoid oversized functions.
+- Avoid filler comments, dead code, speculative abstractions, and unrelated cleanup.
+"""
+
+
 class MockLLM:
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
         body = f"{issue.title}\n{issue.body}".lower()
@@ -116,7 +127,8 @@ class HttpLLM:
             "You are implementing a GitHub issue in a checked-out repository. "
             "Return strict JSON with keys: plan array of strings, changes array, "
             "test_commands array. Each change has path, action write/delete, and content. "
-            "For writes, provide complete file content, not patches. Keep changes small.\n\n"
+            "For writes, provide complete file content, not patches. Keep changes small.\n"
+            f"{ENGINEERING_DISCIPLINE}\n"
             f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
             f"Blocking review findings to fix:\n{findings or 'None'}\n\n"
             f"Repo context:\n{format_context(context)}"
@@ -146,7 +158,8 @@ class HttpLLM:
             "only from the issue, comments, and repo conventions. Return strict JSON with "
             "keys: plan array of strings, changes array, test_commands array. Each change "
             "has path, action write/delete, and content. For writes, provide complete file "
-            "content, not patches. Do not implement product code.\n\n"
+            "content, not patches. Do not implement product code.\n"
+            f"{ENGINEERING_DISCIPLINE}\n"
             f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
             f"Repo context:\n{format_context(context)}"
         )
