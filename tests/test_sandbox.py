@@ -184,6 +184,23 @@ class SandboxTests(unittest.TestCase):
             self.assertNotIn(token, str(raised.exception))
             self.assertIn("secret-like values found in proposed changes", str(raised.exception))
 
+    def test_docker_apply_changes_rejects_path_traversal_before_writing_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+
+            with (
+                patch("autobot.sandbox.subprocess.run") as run,
+                self.assertRaises(SandboxError) as raised,
+            ):
+                DockerSandbox(repo, "python:3.12-slim").apply_changes(
+                    [FileChange("../escape.txt", "no\n")]
+                )
+
+            self.assertFalse(run.called)
+            self.assertFalse((repo.parent / "changes.json").exists())
+            self.assertIn("change path escapes repository", str(raised.exception))
+
     def test_docker_run_redacts_failed_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
@@ -224,7 +241,7 @@ class SandboxTests(unittest.TestCase):
             root = Path(tmp) / "repo"
             root.mkdir()
 
-            with self.assertRaises(ValueError):
+            with self.assertRaises(SandboxError):
                 LocalSandbox(root).apply_changes([FileChange("../escape.txt", "no\n")])
 
             self.assertFalse((root.parent / "escape.txt").exists())

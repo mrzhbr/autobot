@@ -193,6 +193,7 @@ The prototype enforces these guardrails:
 - Stops before committing if Git cannot reliably inspect the staged diff.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
 - Mirrors Docker file writes and directory deletes in dry-run mode.
+- Rejects proposed change paths that escape the repository before writing Docker payloads or local files.
 - Rejects secret-like values in configured sandbox setup commands before Docker execution.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
 - Scans issue text before triage, proposed changes before disk writes, verification commands before execution, and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.

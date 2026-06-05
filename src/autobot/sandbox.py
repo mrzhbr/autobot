@@ -52,6 +52,7 @@ class DockerSandbox:
             self.run(self.setup_command, timeout=1800)
 
     def apply_changes(self, changes: list[FileChange]) -> None:
+        _ensure_relative_change_paths(self.repo_dir, changes)
         _ensure_no_secret_changes(changes)
         payload = [asdict(change) for change in changes]
         change_file = self.repo_dir.parent / "changes.json"
@@ -137,10 +138,10 @@ class LocalSandbox:
         return None
 
     def apply_changes(self, changes: list[FileChange]) -> None:
+        _ensure_relative_change_paths(self.repo_dir, changes)
         _ensure_no_secret_changes(changes)
         for change in changes:
             target = (self.repo_dir / change.path).resolve()
-            target.relative_to(self.repo_dir.resolve())
             if change.action == "delete":
                 if target.is_dir():
                     shutil.rmtree(target)
@@ -215,6 +216,15 @@ def _verification_block(command: str, text: str) -> str:
 def _ensure_no_secret_changes(changes: list[FileChange]) -> None:
     text = "\n".join(f"{change.path}\n{change.content or ''}" for change in changes)
     _sandbox_secret_check(text, "proposed changes")
+
+
+def _ensure_relative_change_paths(repo_dir: Path, changes: list[FileChange]) -> None:
+    root = repo_dir.resolve()
+    for change in changes:
+        try:
+            (root / change.path).resolve().relative_to(root)
+        except ValueError as exc:
+            raise SandboxError("change path escapes repository") from exc
 
 
 def ensure_no_secret_commands(commands: list[str], surface: str = "verification commands") -> None:
