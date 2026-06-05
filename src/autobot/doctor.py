@@ -8,9 +8,10 @@ from dataclasses import asdict, dataclass
 from autobot.config import (
     Config,
     configured_llm_models,
-    incompatible_models_for_provider,
     infer_llm_provider,
-    model_provider_mismatch_message,
+    missing_model_keys,
+    missing_model_keys_message,
+    model_providers,
 )
 from autobot.github import GitHubIssueTracker
 from autobot.sandbox import SandboxError, ensure_no_secret_commands
@@ -154,14 +155,16 @@ def _llm_model_provider_check(config: Config) -> CheckResult:
         return CheckResult("llm model/provider", "skip", "LLM key missing")
     if provider not in {"openai", "anthropic"}:
         return CheckResult("llm model/provider", "skip", "valid LLM_PROVIDER required")
-    incompatible = incompatible_models_for_provider(provider, configured_llm_models(config))
-    if incompatible:
+    models = configured_llm_models(config)
+    missing = missing_model_keys(provider, models)
+    if missing:
         return CheckResult(
             "llm model/provider",
             "fail",
-            model_provider_mismatch_message(provider, incompatible),
+            missing_model_keys_message(missing),
         )
-    return CheckResult("llm model/provider", "pass", f"models match {provider}")
+    providers = ", ".join(model_providers(provider, models))
+    return CheckResult("llm model/provider", "pass", f"model providers available: {providers}")
 
 
 def _sandbox_image_check(config: Config) -> CheckResult:

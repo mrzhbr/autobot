@@ -12,9 +12,9 @@ from autobot.chat import IssueCommentChat
 from autobot.config import (
     Config,
     configured_llm_models,
-    incompatible_models_for_provider,
     infer_llm_provider,
-    model_provider_mismatch_message,
+    missing_model_keys,
+    missing_model_keys_message,
 )
 from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
@@ -146,9 +146,9 @@ def _ensure_live_llm_key(config: Config) -> None:
         raise RuntimeError("ANTHROPIC_API_KEY is required")
     if provider is None:
         raise RuntimeError("OPENAI_API_KEY or ANTHROPIC_API_KEY is required")
-    incompatible = incompatible_models_for_provider(provider, configured_llm_models(config))
-    if incompatible:
-        raise RuntimeError(model_provider_mismatch_message(provider, incompatible))
+    missing = missing_model_keys(provider, configured_llm_models(config))
+    if missing:
+        raise RuntimeError(missing_model_keys_message(missing))
 
 
 def _parser() -> argparse.ArgumentParser:

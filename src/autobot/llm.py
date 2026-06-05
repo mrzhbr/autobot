@@ -9,9 +9,10 @@ from typing import Any
 
 from autobot.config import (
     Config,
-    incompatible_models_for_provider,
     infer_llm_provider,
-    model_provider_mismatch_message,
+    missing_model_keys,
+    missing_model_keys_message,
+    provider_for_model,
 )
 from autobot.context import format_context
 from autobot.models import (
@@ -216,14 +217,17 @@ class HttpLLM:
         return ReviewReport(lens=lens, findings=findings, usage=usage)
 
     def _json_call(self, role: str, model: str, prompt: str) -> tuple[dict[str, Any], Usage]:
-        incompatible = incompatible_models_for_provider(self.provider, [model])
-        if incompatible:
-            raise LLMError(model_provider_mismatch_message(self.provider, incompatible))
-        if self.provider == "anthropic":
+        if self.provider not in {"openai", "anthropic"}:
+            raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
+        missing = missing_model_keys(self.provider, [model])
+        if missing:
+            raise LLMError(missing_model_keys_message(missing))
+        provider = provider_for_model(self.provider, model)
+        if provider == "anthropic":
             return self._anthropic_json(role, model, prompt)
-        if self.provider == "openai":
+        if provider == "openai":
             return self._openai_json(role, model, prompt)
-        raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
+        raise LLMError(f"unknown LLM_PROVIDER: {provider}")
 
     def _openai_json(self, role: str, model: str, prompt: str) -> tuple[dict[str, Any], Usage]:
         token = os.getenv("OPENAI_API_KEY")

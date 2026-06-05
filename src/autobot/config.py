@@ -8,6 +8,7 @@ OPENAI_DEFAULT_MODEL = "gpt-4.1"
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4")
 ANTHROPIC_MODEL_PREFIXES = ("claude-",)
+LLM_KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 
 
 @dataclass(frozen=True)
@@ -102,19 +103,35 @@ def model_provider_hint(model: str) -> str | None:
     return None
 
 
-def incompatible_models_for_provider(provider: str | None, models: list[str]) -> list[str]:
-    if provider not in {"openai", "anthropic"}:
-        return []
-    incompatible: list[str] = []
+def provider_for_model(default_provider: str, model: str) -> str:
+    return model_provider_hint(model) or default_provider
+
+
+def missing_model_keys(default_provider: str | None, models: list[str]) -> dict[str, list[str]]:
+    if default_provider not in LLM_KEY_ENV:
+        return {}
+    missing: dict[str, list[str]] = {}
     for model in models:
-        hint = model_provider_hint(model)
-        if hint and hint != provider and model not in incompatible:
-            incompatible.append(model)
-    return incompatible
+        provider = provider_for_model(default_provider, model)
+        key_name = LLM_KEY_ENV[provider]
+        if os.getenv(key_name):
+            continue
+        missing.setdefault(key_name, [])
+        if model not in missing[key_name]:
+            missing[key_name].append(model)
+    return missing
 
 
-def model_provider_mismatch_message(provider: str, models: list[str]) -> str:
-    return f"configured model(s) do not match selected LLM provider {provider}: {', '.join(models)}"
+def missing_model_keys_message(missing: dict[str, list[str]]) -> str:
+    parts = [f"{key} for {', '.join(models)}" for key, models in sorted(missing.items())]
+    return "missing LLM API key(s) for configured model(s): " + "; ".join(parts)
+
+
+def model_providers(default_provider: str | None, models: list[str]) -> list[str]:
+    if default_provider not in LLM_KEY_ENV:
+        return []
+    providers = [provider_for_model(default_provider, model) for model in models]
+    return list(dict.fromkeys(providers))
 
 
 def _default_model(provider: str | None) -> str:

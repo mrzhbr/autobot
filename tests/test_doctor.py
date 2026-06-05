@@ -120,7 +120,7 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["llm key"].message, "ANTHROPIC_API_KEY is set")
             self.assertEqual(by_name["triage model"].message, "claude-sonnet-4-20250514")
 
-    def test_live_doctor_fails_cross_provider_review_models(self) -> None:
+    def test_live_doctor_fails_review_model_when_matching_key_is_missing(self) -> None:
         env = {
             "GITHUB_TOKEN": "x",
             "OPENAI_API_KEY": "x",
@@ -134,11 +134,25 @@ class DoctorTests(unittest.TestCase):
             by_name = {check.name: check for check in checks}
             self.assertFalse(doctor_ok(checks))
             self.assertEqual(by_name["llm model/provider"].status, "fail")
-            self.assertIn(
-                "configured model(s) do not match selected LLM provider openai",
-                by_name["llm model/provider"].message,
-            )
+            self.assertIn("ANTHROPIC_API_KEY", by_name["llm model/provider"].message)
             self.assertIn("claude-sonnet-4-20250514", by_name["llm model/provider"].message)
+
+    def test_live_doctor_accepts_mixed_review_models_when_keys_exist(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "ANTHROPIC_API_KEY": "x",
+            "REVIEW_MODELS": "gpt-4.1,claude-sonnet-4-20250514",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertTrue(doctor_ok(checks))
+            self.assertEqual(by_name["llm model/provider"].status, "pass")
+            self.assertIn("openai, anthropic", by_name["llm model/provider"].message)
 
     def test_live_doctor_warns_when_sandbox_network_allows_egress(self) -> None:
         env = {

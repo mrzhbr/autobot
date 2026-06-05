@@ -98,7 +98,7 @@ class CliTests(unittest.TestCase):
         processor.assert_not_called()
         self.assertIn("LLM_PROVIDER must be openai or anthropic", stderr.getvalue())
 
-    def test_live_run_rejects_cross_provider_review_models_before_processor(self) -> None:
+    def test_live_run_rejects_review_model_when_matching_key_is_missing(self) -> None:
         with (
             patch.dict(
                 "os.environ",
@@ -116,11 +116,31 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         processor.assert_not_called()
-        self.assertIn(
-            "configured model(s) do not match selected LLM provider openai",
-            stderr.getvalue(),
-        )
+        self.assertIn("ANTHROPIC_API_KEY", stderr.getvalue())
         self.assertIn("claude-sonnet-4-20250514", stderr.getvalue())
+
+    def test_live_run_accepts_mixed_review_models_when_keys_exist(self) -> None:
+        processor = FakeWatchProcessor()
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GITHUB_TOKEN": "x",
+                    "OPENAI_API_KEY": "x",
+                    "ANTHROPIC_API_KEY": "x",
+                    "REVIEW_MODELS": "gpt-4.1,claude-sonnet-4-20250514",
+                },
+                clear=True,
+            ),
+            patch("autobot.cli._processor", return_value=processor) as build_processor,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 0)
+        self.assertIn('"state": "pr_open"', stdout.getvalue())
+        config = build_processor.call_args.args[0]
+        self.assertEqual(config.review_models, ["gpt-4.1", "claude-sonnet-4-20250514"])
 
     def test_live_run_accepts_anthropic_key_without_openai_key(self) -> None:
         processor = FakeWatchProcessor()

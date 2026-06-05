@@ -31,6 +31,20 @@ class CapturingLLM(HttpLLM):
         )
 
 
+class RoutingLLM(HttpLLM):
+    def __init__(self, config: Config) -> None:
+        super().__init__(config)
+        self.providers: list[tuple[str, str]] = []
+
+    def _openai_json(self, role: str, model: str, prompt: str):
+        self.providers.append(("openai", model))
+        return {"findings": []}, Usage(role, model, 1, 1, 0.001)
+
+    def _anthropic_json(self, role: str, model: str, prompt: str):
+        self.providers.append(("anthropic", model))
+        return {"findings": []}, Usage(role, model, 1, 1, 0.001)
+
+
 class LLMTests(unittest.TestCase):
     def test_implement_prompt_encodes_engineering_discipline(self) -> None:
         llm = _llm()
@@ -109,7 +123,7 @@ class LLMTests(unittest.TestCase):
 
         self.assertEqual(llm.provider, "anthropic")
 
-    def test_http_llm_rejects_cross_provider_model_before_request(self) -> None:
+    def test_http_llm_rejects_model_when_matching_key_is_missing(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmp,
             patch.dict("os.environ", {"OPENAI_API_KEY": "x"}, clear=True),
@@ -125,10 +139,26 @@ class LLMTests(unittest.TestCase):
             )
 
         urlopen.assert_not_called()
-        self.assertIn(
-            "configured model(s) do not match selected LLM provider openai",
-            str(raised.exception),
-        )
+        self.assertIn("ANTHROPIC_API_KEY", str(raised.exception))
+
+    def test_http_llm_routes_model_hint_to_matching_provider(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "x", "ANTHROPIC_API_KEY": "x"},
+                clear=True,
+            ),
+        ):
+            llm = RoutingLLM(Config.from_env(Path(tmp)))
+            llm.review(
+                "correctness",
+                _issue(),
+                "diff --git a/app.py b/app.py",
+                model="claude-sonnet-4-20250514",
+            )
+
+        self.assertEqual(llm.providers, [("anthropic", "claude-sonnet-4-20250514")])
 
     def test_pricing_uses_role_specific_env_vars(self) -> None:
         with patch.dict(

@@ -37,7 +37,14 @@ export REVIEW_MODELS=gpt-4.1
 
 `LLM_PROVIDER` may be unset, `openai`, or `anthropic`; any other value fails preflight before processing an issue.
 When `MODEL` is unset, the default model follows the inferred provider: OpenAI uses `gpt-4.1`, Anthropic uses `claude-sonnet-4-20250514`. If both provider keys are present and `LLM_PROVIDER` is unset, OpenAI is selected.
-Configured model names that clearly belong to another provider fail preflight before any issue processing or provider request starts.
+Configured model names that clearly belong to a provider route to that provider when the matching key is set, and fail preflight when that key is missing.
+
+When both provider keys are configured, reviewer rotation can use both model families:
+
+```sh
+export ANTHROPIC_API_KEY=...
+export REVIEW_MODELS=gpt-4.1,claude-sonnet-4-20250514
+```
 
 Anthropic can be used instead:
 
@@ -160,7 +167,7 @@ Issue reads include the newest comment page from GitHub pagination links, so cla
 
 Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.py`.
 
-Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model for the selected provider. This prototype does not mix OpenAI and Anthropic reviewers in a single run. If unset, all reviewers use `REVIEW_MODEL`.
+Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model. Provider-hinted model names route each review call to the matching OpenAI or Anthropic adapter when the corresponding key is present. If unset, all reviewers use `REVIEW_MODEL`.
 
 `MAX_REVIEW_ROUNDS` defaults to `3` and must stay between `1` and `3`, preserving
 the prototype stopping rule that a draft PR cannot open without review and that
