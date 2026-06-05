@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from autobot.models import FileChange
-from autobot.sandbox import DockerSandbox, LocalSandbox, detect_setup_command
+from autobot.sandbox import DockerSandbox, LocalSandbox, SandboxError, detect_setup_command
 
 
 class SandboxTests(unittest.TestCase):
@@ -98,6 +98,25 @@ class SandboxTests(unittest.TestCase):
         self.assertIn(f"{repo.parent}:/changes:ro", command)
         self.assertEqual(command[command.index("--network") + 1], "none")
 
+    def test_docker_apply_changes_rejects_secret_like_payload_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            token = "ghp_" + ("A" * 36)
+
+            with (
+                patch("autobot.sandbox.subprocess.run") as run,
+                self.assertRaises(SandboxError) as raised,
+            ):
+                DockerSandbox(repo, "python:3.12-slim").apply_changes(
+                    [FileChange("README.md", f"{token}\n")]
+                )
+
+            self.assertFalse(run.called)
+            self.assertFalse((repo.parent / "changes.json").exists())
+            self.assertNotIn(token, str(raised.exception))
+            self.assertIn("secret-like values found in proposed changes", str(raised.exception))
+
     def test_local_sandbox_rejects_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repo"
@@ -107,6 +126,19 @@ class SandboxTests(unittest.TestCase):
                 LocalSandbox(root).apply_changes([FileChange("../escape.txt", "no\n")])
 
             self.assertFalse((root.parent / "escape.txt").exists())
+
+    def test_local_sandbox_rejects_secret_like_payload_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            token = "sk-" + ("A" * 40)
+
+            with self.assertRaises(SandboxError) as raised:
+                LocalSandbox(root).apply_changes([FileChange("README.md", f"{token}\n")])
+
+            self.assertFalse((root / "README.md").exists())
+            self.assertNotIn(token, str(raised.exception))
+            self.assertIn("secret-like values found in proposed changes", str(raised.exception))
 
 
 if __name__ == "__main__":

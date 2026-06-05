@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from autobot.models import FileChange
-from autobot.scanner import redact_secret_like_values
+from autobot.scanner import find_secret_like_values, redact_secret_like_values
 
 
 class SandboxError(RuntimeError):
@@ -45,6 +45,7 @@ class DockerSandbox:
             self.run(self.setup_command, timeout=1800)
 
     def apply_changes(self, changes: list[FileChange]) -> None:
+        _ensure_no_secret_changes(changes)
         payload = [asdict(change) for change in changes]
         change_file = self.repo_dir.parent / "changes.json"
         change_file.write_text(json.dumps(payload), encoding="utf-8")
@@ -105,6 +106,7 @@ class LocalSandbox:
         return None
 
     def apply_changes(self, changes: list[FileChange]) -> None:
+        _ensure_no_secret_changes(changes)
         for change in changes:
             target = (self.repo_dir / change.path).resolve()
             target.relative_to(self.repo_dir.resolve())
@@ -172,6 +174,13 @@ def run_verification_allow_failure(
 
 def _verification_block(command: str, text: str) -> str:
     return redact_secret_like_values(f"$ {command}\n{text}")
+
+
+def _ensure_no_secret_changes(changes: list[FileChange]) -> None:
+    text = "\n".join(f"{change.path}\n{change.content or ''}" for change in changes)
+    if secrets := find_secret_like_values(text):
+        count = len(secrets)
+        raise SandboxError(f"secret-like values found in proposed changes: {count} finding(s)")
 
 
 def _has_python_setup(repo_dir: Path) -> bool:
