@@ -16,6 +16,7 @@ from autobot.config import (
     invalid_price_vars,
     missing_model_keys,
     missing_model_keys_message,
+    missing_price_vars,
 )
 from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
@@ -172,6 +173,11 @@ def _ensure_live_llm_key(config: Config) -> None:
     invalid = invalid_price_vars()
     if invalid:
         raise RuntimeError("LLM pricing env vars must be numeric: " + ", ".join(invalid))
+    missing_prices = missing_price_vars()
+    if config.max_issue_dollars is not None and missing_prices:
+        raise RuntimeError(
+            "MAX_ISSUE_DOLLARS requires LLM pricing env vars: " + ", ".join(missing_prices)
+        )
 
 
 def _ensure_live_prereqs(config: Config) -> None:

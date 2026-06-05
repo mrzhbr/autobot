@@ -54,7 +54,7 @@ export LLM_PROVIDER=anthropic
 export MODEL=claude-sonnet-4-20250514
 ```
 
-Optional cost pricing is read from env. If unset, token usage is recorded and dollars are reported as `not configured`; live `run`, `watch`, and `doctor` fail nonnumeric pricing values before processing an issue, and `doctor` warns about missing live pricing. If `MAX_ISSUE_DOLLARS` is set, live preflight requires pricing env vars so the hard dollar cap can actually be enforced.
+Optional cost pricing is read from env. If unset, token usage is recorded and dollars are reported as `not configured`; live `run`, `watch`, and `doctor` fail nonnumeric pricing values before processing an issue, and `doctor` warns about missing live pricing. If `MAX_ISSUE_DOLLARS` is set, live `run`, `watch`, and `doctor` require pricing env vars so the hard dollar cap can actually be enforced.
 
 ```sh
 export TRIAGE_INPUT_PRICE_PER_1K=0.002
