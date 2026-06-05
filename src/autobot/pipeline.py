@@ -324,6 +324,7 @@ class IssueProcessor:
             record.files_touched = [change.path for change in all_changes]
             record.conversation["ci_status"] = {"state": "dry-run"}
             record.conversation["pr_url"] = "dry-run://draft-pr"
+            record.pr_url = "dry-run://draft-pr"
             record.transition(IssueState.PR_OPEN)
             record.cost = ledger.to_dict()
             self.store.upsert(record)
@@ -346,6 +347,7 @@ class IssueProcessor:
         self.tracker.set_label(issue.repo, issue.number, "agent-pr-open")
         self.audit.record("label", issue.repo, issue.number, {"label": "agent-pr-open"})
         record.conversation["pr_url"] = pr_url
+        record.pr_url = pr_url
         record.files_touched = changed_files(repo_dir)
         record.transition(IssueState.PR_OPEN)
         record.cost = ledger.to_dict()

@@ -235,6 +235,7 @@ class PipelineTests(unittest.TestCase):
                 ["Which behavior should be used?"],
             )
             self.assertEqual(loaded.conversation["pr_url"], "dry-run://draft-pr")
+            self.assertEqual(loaded.pr_url, "dry-run://draft-pr")
             self.assertEqual(loaded.conversation["ci_status"]["state"], "dry-run")
             self.assertEqual(loaded.plan["acceptance_tests"], ["Write acceptance test."])
             self.assertEqual(loaded.plan["acceptance_test_baseline"]["ok"], True)
@@ -336,6 +337,9 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(second.state, IssueState.PR_OPEN)
             self.assertEqual(second.message, "draft pull request already open")
             self.assertEqual(second.pr_url, "dry-run://draft-pr")
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.pr_url, "dry-run://draft-pr")
 
     def test_abandoned_rerun_does_not_restart_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

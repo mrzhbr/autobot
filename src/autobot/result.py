@@ -19,8 +19,10 @@ def finish_process(
     cost = ledger.to_dict()
     cost["wall_seconds"] = round(time.monotonic() - started, 2)
     record.cost = cost
+    if pr_url:
+        record.pr_url = pr_url
     store.upsert(record)
-    resolved_pr_url = pr_url or record.conversation.get("pr_url")
+    resolved_pr_url = pr_url or record.pr_url or record.conversation.get("pr_url")
     return ProcessResult(
         state=record.state,
         message=message,

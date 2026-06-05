@@ -6,7 +6,7 @@ The implementation is intentionally thin but end-to-end:
 
 - `cli run --repo <owner/name> --issue <n>` processes one issue.
 - `cli watch --repo <owner/name>` polls for issues assigned to or mentioning `AGENT_LOGIN`.
-- SQLite stores durable per-issue state in `.autobot/state.db`.
+- SQLite stores durable per-issue state, including PR URLs, in `.autobot/state.db`.
 - Outward actions are appended to `.autobot/audit.jsonl`.
 - Pydantic validates structured LLM output before the pipeline acts on it.
 - Live runs use GitHub Issues, GitHub PRs, Docker, and an OpenAI or Anthropic-compatible LLM path.

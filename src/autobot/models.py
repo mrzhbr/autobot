@@ -126,6 +126,7 @@ class IssueRecord:
     blocked_on: str | None = None
     review_rounds: int = 0
     files_touched: list[str] = field(default_factory=list)
+    pr_url: str | None = None
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 

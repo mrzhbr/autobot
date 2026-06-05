@@ -34,12 +34,14 @@ class StateStore:
                     blocked_on text,
                     review_rounds integer not null,
                     files_touched_json text not null,
+                    pr_url text,
                     created_at text not null,
                     updated_at text not null,
                     primary key (repo, issue_number)
                 )
                 """
             )
+            _ensure_column(conn, "issue_state", "pr_url", "text")
 
     def get(self, repo: str, issue_number: int) -> IssueRecord | None:
         with self._connect() as conn:
@@ -66,10 +68,10 @@ class StateStore:
                 """
                 insert into issue_state (
                     repo, issue_number, state, conversation_json, branch, plan_json,
-                    cost_json, blocked_on, review_rounds, files_touched_json,
+                    cost_json, blocked_on, review_rounds, files_touched_json, pr_url,
                     created_at, updated_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(repo, issue_number) do update set
                     state = excluded.state,
                     conversation_json = excluded.conversation_json,
@@ -79,6 +81,7 @@ class StateStore:
                     blocked_on = excluded.blocked_on,
                     review_rounds = excluded.review_rounds,
                     files_touched_json = excluded.files_touched_json,
+                    pr_url = excluded.pr_url,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -92,6 +95,7 @@ class StateStore:
                     record.blocked_on,
                     record.review_rounds,
                     json.dumps(record.files_touched, sort_keys=True),
+                    record.pr_url,
                     record.created_at,
                     record.updated_at,
                 ),
@@ -112,17 +116,25 @@ class StateStore:
         return json.loads(value)
 
     def _record_from_row(self, row: sqlite3.Row) -> IssueRecord:
+        conversation = self._loads(row["conversation_json"], {})
         return IssueRecord(
             repo=row["repo"],
             issue_number=int(row["issue_number"]),
             state=IssueState(row["state"]),
-            conversation=self._loads(row["conversation_json"], {}),
+            conversation=conversation,
             branch=row["branch"],
             plan=self._loads(row["plan_json"], {}),
             cost=self._loads(row["cost_json"], {}),
             blocked_on=row["blocked_on"],
             review_rounds=int(row["review_rounds"]),
             files_touched=self._loads(row["files_touched_json"], []),
+            pr_url=row["pr_url"] or conversation.get("pr_url"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, name: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
+    if name not in columns:
+        conn.execute(f"alter table {table} add column {name} {definition}")
