@@ -15,6 +15,12 @@ def passing_command(command, capture_output, text, check, timeout):
     return SimpleNamespace(returncode=0, stdout=f"{command[0]} ok\n", stderr="")
 
 
+def missing_git_identity_command(command, capture_output, text, check, timeout):
+    if command[:3] == ["git", "config", "--get"]:
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+    return passing_command(command, capture_output, text, check, timeout)
+
+
 class FakeTracker:
     def __init__(self, token: str | None, agent_login: str | None) -> None:
         self.token = token
@@ -45,9 +51,22 @@ class DoctorTests(unittest.TestCase):
             by_name = {check.name: check for check in checks}
             self.assertTrue(doctor_ok(checks))
             self.assertEqual(by_name["github token"].status, "skip")
+            self.assertEqual(by_name["git identity"].status, "skip")
             self.assertEqual(by_name["llm key"].status, "skip")
             self.assertEqual(by_name["sandbox network"].status, "skip")
             self.assertEqual(by_name["issue readable"].status, "skip")
+
+    def test_live_doctor_fails_when_git_identity_is_missing(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=missing_git_identity_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["git identity"].status, "fail")
+            self.assertIn("user.name", by_name["git identity"].message)
 
     def test_live_doctor_warns_when_sandbox_network_allows_egress(self) -> None:
         env = {

@@ -84,6 +84,8 @@ Check live-run prerequisites without posting comments, pushing branches, or open
 ./cli doctor --repo owner/name --issue 123
 ```
 
+Live doctor checks Git, git author identity, Docker, GitHub credentials, LLM credentials, model names, sandbox network settings, and optional issue readability.
+
 Run a local dry-run against a public issue body:
 
 ```sh

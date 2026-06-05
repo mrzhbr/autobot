@@ -29,6 +29,7 @@ def run_doctor(
 ) -> list[CheckResult]:
     checks = [
         _command_check("git", ["git", "--version"], command_runner),
+        _git_identity_check(config, command_runner),
         _command_check("docker", ["docker", "--version"], command_runner),
         _github_token_check(config),
         _agent_login_check(config),
@@ -56,6 +57,34 @@ def _command_check(name: str, command: list[str], command_runner: Callable) -> C
         return CheckResult(name, "fail", (result.stderr or result.stdout).strip())
     first_line = (result.stdout or "").splitlines()[0] if result.stdout else "available"
     return CheckResult(name, "pass", first_line)
+
+
+def _git_identity_check(config: Config, command_runner: Callable) -> CheckResult:
+    if config.dry_run:
+        return CheckResult("git identity", "skip", "dry-run does not commit")
+    if os.getenv("GIT_AUTHOR_NAME") and os.getenv("GIT_AUTHOR_EMAIL"):
+        return CheckResult("git identity", "pass", "GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL are set")
+    name = _git_config("user.name", command_runner)
+    email = _git_config("user.email", command_runner)
+    if name and email:
+        return CheckResult("git identity", "pass", f"{name} <{email}>")
+    return CheckResult("git identity", "fail", "configure git user.name and user.email")
+
+
+def _git_config(key: str, command_runner: Callable) -> str | None:
+    try:
+        result = command_runner(
+            ["git", "config", "--get", key],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
 
 
 def _github_token_check(config: Config) -> CheckResult:
