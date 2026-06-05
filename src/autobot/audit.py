@@ -6,6 +6,8 @@ from typing import Any
 
 from autobot.models import utc_now
 
+SENSITIVE_KEYS = ("token", "secret", "password", "credential", "api_key", "authorization")
+
 
 class AuditLog:
     def __init__(self, path: Path) -> None:
@@ -26,10 +28,16 @@ class AuditLog:
     def _sanitize(self, value: Any) -> Any:
         if isinstance(value, dict):
             return {
-                key: self._sanitize(val) for key, val in value.items() if "token" not in key.lower()
+                key: "[redacted]" if _sensitive_key(key) else self._sanitize(val)
+                for key, val in value.items()
             }
         if isinstance(value, list):
             return [self._sanitize(item) for item in value]
         if isinstance(value, str) and len(value) > 1200:
             return value[:1200] + "...[truncated]"
         return value
+
+
+def _sensitive_key(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return any(marker in normalized for marker in SENSITIVE_KEYS)
