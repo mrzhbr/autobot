@@ -54,16 +54,20 @@ def finalize_draft_pr(
         record,
     )
     set_issue_label(tracker, audit, record, issue, "agent-pr-open")
-    _record_changed_files(record, repo_dir)
+    _record_changed_files(record, repo_dir, files_to_commit)
     record.transition(IssueState.PR_OPEN)
     store.upsert(record)
     return pr_url
 
 
-def _record_changed_files(record: IssueRecord, repo_dir: Path) -> None:
+def _record_changed_files(
+    record: IssueRecord, repo_dir: Path, fallback_paths: list[str] | None = None
+) -> None:
     try:
         record.files_touched = changed_files(repo_dir)
     except Exception as exc:
+        if fallback_paths is not None:
+            record.files_touched = list(dict.fromkeys(fallback_paths))
         record.conversation.setdefault("finalize_warnings", []).append(
             {
                 "action": "changed_files",

@@ -954,6 +954,8 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(loaded.state, IssueState.PR_OPEN)
             self.assertEqual(loaded.pr_url, "https://github.test/pull/1")
+            self.assertEqual(loaded.files_touched, ["tests/test_issue_1.py", "README.md"])
+            self.assertEqual(result.files_touched, ["tests/test_issue_1.py", "README.md"])
             warning = loaded.conversation["finalize_warnings"][0]
             self.assertEqual(warning["action"], "changed_files")
             self.assertIn("[redacted-secret]", warning["error"])

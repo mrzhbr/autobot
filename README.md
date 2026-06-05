@@ -215,7 +215,7 @@ The prototype enforces these guardrails:
 - Creates those GitHub labels on first use if the target repo does not already have them, tolerating concurrent creation.
 - Records label and label-audit failures in state without undoing an already-posted comment or opened draft PR.
 - Records push and draft-PR audit failures as state warnings without abandoning successful outward actions.
-- Records late changed-file summary failures as state warnings without abandoning an opened draft PR.
+- Records late changed-file summary failures as state warnings without abandoning an opened draft PR, and falls back to the authored path list for the run summary.
 - Records outward comments, labels, pushes, and draft PRs to the audit log.
 
 ## Sandbox
