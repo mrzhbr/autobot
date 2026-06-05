@@ -108,7 +108,7 @@ class FakeGitHost:
     def current_diff(self, repo_dir: Path) -> str:
         return ""
 
-    def commit_all(self, repo_dir: Path, message: str) -> bool:
+    def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
         return True
 
     def push(self, repo: str, repo_dir: Path, branch: str) -> None:
@@ -128,6 +128,15 @@ class CountingGitHost(FakeGitHost):
     def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         self.opened_prs += 1
         return super().open_draft_pr(repo, branch, title, body)
+
+
+class CommitPathGitHost(FakeGitHost):
+    def __init__(self) -> None:
+        self.commit_paths: list[str] | None = None
+
+    def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
+        self.commit_paths = paths
+        return True
 
 
 class PackageLockGitHost(FakeGitHost):
@@ -665,6 +674,30 @@ class PipelineTests(unittest.TestCase):
             )
             git_index = next(index for index, command in enumerate(commands) if command[0] == "git")
             self.assertLess(cleanup_index, git_index)
+
+    def test_live_pipeline_commits_only_model_authored_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            git_host = CommitPathGitHost()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=git_host,
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with patch("autobot.sandbox.subprocess.run", return_value=completed):
+                result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(git_host.commit_paths, ["tests/test_issue_1.py", "README.md"])
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

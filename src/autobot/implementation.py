@@ -83,6 +83,7 @@ class ImplementationRunner:
                 self.tracker,
                 self.audit,
                 self.store,
+                _unique_paths(artifacts.all_changes),
             )
         finally:
             if not dry_run:

@@ -324,6 +324,26 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_commit_all_stages_only_requested_paths(self) -> None:
+        host = RecordingGitHost()
+        changed = SimpleNamespace(returncode=1, stdout="", stderr="")
+
+        with patch("autobot.github.subprocess.run", return_value=changed):
+            committed = host.commit_all(
+                Path("/tmp/repo"),
+                "feat: change",
+                ["README.md", "tests/test_demo.py"],
+            )
+
+        self.assertTrue(committed)
+        self.assertEqual(
+            host.commands,
+            [
+                ["git", "add", "-A", "--", "README.md", "tests/test_demo.py"],
+                ["git", "commit", "-m", "feat: change"],
+            ],
+        )
+
     def test_http_errors_redact_token_like_payloads(self) -> None:
         token = "ghp_" + ("A" * 36)
         error = urllib.error.HTTPError(

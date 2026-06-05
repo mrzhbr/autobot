@@ -24,8 +24,11 @@ def finalize_draft_pr(
     tracker: IssueTracker,
     audit: AuditLog,
     store: StateStore,
+    files_to_commit: list[str] | None = None,
 ) -> str:
-    committed = git_host.commit_all(repo_dir, f"feat: implement issue #{issue.number}")
+    committed = git_host.commit_all(
+        repo_dir, f"feat: implement issue #{issue.number}", files_to_commit
+    )
     if not committed:
         raise RuntimeError("no changes to commit")
     branch = record.branch or branch_name(issue)

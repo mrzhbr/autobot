@@ -237,8 +237,9 @@ class GitHubGitHost:
         paths = self._git(repo_dir, ["ls-files", "--others", "--exclude-standard"]).splitlines()
         return render_untracked_diff(repo_dir, paths)
 
-    def commit_all(self, repo_dir: Path, message: str) -> bool:
-        self._git(repo_dir, ["add", "-A"])
+    def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
+        add_args = ["add", "-A"] if paths is None else ["add", "-A", "--", *paths]
+        self._git(repo_dir, add_args)
         quiet = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             cwd=repo_dir,

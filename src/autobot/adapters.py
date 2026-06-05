@@ -36,8 +36,8 @@ class GitHost(Protocol):
     def current_diff(self, repo_dir: Path) -> str:
         """Return the working tree diff."""
 
-    def commit_all(self, repo_dir: Path, message: str) -> bool:
-        """Commit all changes. Return False when there is nothing to commit."""
+    def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
+        """Commit selected paths, or all changes when paths is omitted."""
 
     def push(self, repo: str, repo_dir: Path, branch: str) -> None:
         """Push branch without force."""
