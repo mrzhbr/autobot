@@ -13,7 +13,9 @@ DEFAULT_BRANCHES = {"main", "master", "trunk", "develop"}
 
 
 class GitHubError(RuntimeError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class GitHubIssueTracker:
@@ -80,7 +82,21 @@ class GitHubIssueTracker:
         return int(data["id"])
 
     def set_label(self, repo: str, issue_number: int, label: str) -> None:
-        self._request("POST", f"/repos/{repo}/issues/{issue_number}/labels", {"labels": [label]})
+        try:
+            self._request(
+                "POST", f"/repos/{repo}/issues/{issue_number}/labels", {"labels": [label]}
+            )
+        except GitHubError as exc:
+            if exc.status_code != 422:
+                raise
+            self._request(
+                "POST",
+                f"/repos/{repo}/labels",
+                {"name": label, "color": "ededed"},
+            )
+            self._request(
+                "POST", f"/repos/{repo}/issues/{issue_number}/labels", {"labels": [label]}
+            )
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         url = f"https://api.github.com{path}"
@@ -98,7 +114,8 @@ class GitHubIssueTracker:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             payload = exc.read().decode("utf-8", errors="replace")
-            raise GitHubError(f"GitHub {method} {path} failed: {exc.code} {payload}") from exc
+            message = f"GitHub {method} {path} failed: {exc.code} {payload}"
+            raise GitHubError(message, status_code=exc.code) from exc
 
 
 def _last_link_page(link: str) -> int | None:

@@ -102,6 +102,25 @@ class LinkedIssueTracker(PagedIssueTracker):
         return super()._request(method, path, body)
 
 
+class LabelTracker(GitHubIssueTracker):
+    def __init__(self, status_code: int = 422) -> None:
+        super().__init__("token", "bot")
+        self.status_code = status_code
+        self.requests: list[tuple[str, str, dict | None]] = []
+        self.label_attempts = 0
+
+    def _request(self, method: str, path: str, body: dict | None = None):
+        self.requests.append((method, path, body))
+        if path == "/repos/owner/repo/issues/7/labels":
+            self.label_attempts += 1
+            if self.label_attempts == 1:
+                raise GitHubError("label failed", status_code=self.status_code)
+            return {}
+        if path == "/repos/owner/repo/labels":
+            return {"name": body["name"] if body else ""}
+        return {}
+
+
 class GitHubSafetyTests(unittest.TestCase):
     def setUp(self) -> None:
         RecordingTracker.requests = []
@@ -193,6 +212,32 @@ class GitHubSafetyTests(unittest.TestCase):
             ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=2"),
             tracker.requests,
         )
+
+    def test_set_label_creates_missing_repo_label_then_retries(self) -> None:
+        tracker = LabelTracker()
+
+        tracker.set_label("owner/repo", 7, "agent-waiting")
+
+        self.assertEqual(
+            tracker.requests,
+            [
+                ("POST", "/repos/owner/repo/issues/7/labels", {"labels": ["agent-waiting"]}),
+                (
+                    "POST",
+                    "/repos/owner/repo/labels",
+                    {"name": "agent-waiting", "color": "ededed"},
+                ),
+                ("POST", "/repos/owner/repo/issues/7/labels", {"labels": ["agent-waiting"]}),
+            ],
+        )
+
+    def test_set_label_does_not_mask_non_validation_errors(self) -> None:
+        tracker = LabelTracker(status_code=500)
+
+        with self.assertRaisesRegex(GitHubError, "label failed"):
+            tracker.set_label("owner/repo", 7, "agent-waiting")
+
+        self.assertEqual(len(tracker.requests), 1)
 
 
 if __name__ == "__main__":
