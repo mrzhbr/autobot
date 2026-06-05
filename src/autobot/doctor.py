@@ -47,6 +47,7 @@ def run_doctor(
         _model_check("implement model", config.implement_model),
         _model_check("review model", config.review_model),
         _llm_model_provider_check(config),
+        _llm_pricing_check(config),
         _sandbox_image_check(config),
         _sandbox_network_check(config),
         _sandbox_setup_check(config),
@@ -165,6 +166,38 @@ def _llm_model_provider_check(config: Config) -> CheckResult:
         )
     providers = ", ".join(model_providers(provider, models))
     return CheckResult("llm model/provider", "pass", f"model providers available: {providers}")
+
+
+def _llm_pricing_check(config: Config) -> CheckResult:
+    if config.mock_llm or config.dry_run:
+        return CheckResult("llm pricing", "skip", "mock or dry-run mode reports zero dollars")
+    provider = infer_llm_provider(config.llm_provider)
+    if provider not in {"openai", "anthropic"}:
+        return CheckResult("llm pricing", "skip", "valid LLM_PROVIDER required")
+    missing = _missing_price_vars()
+    if missing:
+        return CheckResult(
+            "llm pricing",
+            "warn",
+            "dollars will be reported as not configured; missing " + ", ".join(missing),
+        )
+    return CheckResult(
+        "llm pricing", "pass", "triage, implement, test, and review prices configured"
+    )
+
+
+def _missing_price_vars() -> list[str]:
+    missing: list[str] = []
+    for role in ("TRIAGE", "IMPLEMENT", "REVIEW"):
+        missing.extend(_missing_role_price_vars(role))
+    if _missing_role_price_vars("TEST") and _missing_role_price_vars("IMPLEMENT"):
+        missing.extend(_missing_role_price_vars("TEST"))
+    return missing
+
+
+def _missing_role_price_vars(role: str) -> list[str]:
+    names = [f"{role}_INPUT_PRICE_PER_1K", f"{role}_OUTPUT_PRICE_PER_1K"]
+    return [name for name in names if not os.getenv(name)]
 
 
 def _sandbox_image_check(config: Config) -> CheckResult:

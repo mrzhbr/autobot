@@ -154,6 +154,39 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["llm model/provider"].status, "pass")
             self.assertIn("openai, anthropic", by_name["llm model/provider"].message)
 
+    def test_live_doctor_warns_when_llm_pricing_is_missing(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["llm pricing"].status, "warn")
+            self.assertIn("not configured", by_name["llm pricing"].message)
+            self.assertIn("TRIAGE_INPUT_PRICE_PER_1K", by_name["llm pricing"].message)
+            self.assertIn("REVIEW_OUTPUT_PRICE_PER_1K", by_name["llm pricing"].message)
+
+    def test_live_doctor_passes_when_llm_pricing_is_configured(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "TRIAGE_INPUT_PRICE_PER_1K": "0.001",
+            "TRIAGE_OUTPUT_PRICE_PER_1K": "0.002",
+            "IMPLEMENT_INPUT_PRICE_PER_1K": "0.003",
+            "IMPLEMENT_OUTPUT_PRICE_PER_1K": "0.004",
+            "REVIEW_INPUT_PRICE_PER_1K": "0.005",
+            "REVIEW_OUTPUT_PRICE_PER_1K": "0.006",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["llm pricing"].status, "pass")
+            self.assertIn("test", by_name["llm pricing"].message)
+
     def test_live_doctor_warns_when_sandbox_network_allows_egress(self) -> None:
         env = {
             "GITHUB_TOKEN": "x",
