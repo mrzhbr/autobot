@@ -59,6 +59,30 @@ class FakeTracker:
         return None
 
 
+class FakeGitHost:
+    def clone(self, repo: str, target_dir: Path) -> None:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "README.md").write_text("# Repo\n", encoding="utf-8")
+
+    def create_branch(self, repo_dir: Path, branch: str) -> None:
+        return None
+
+    def current_diff(self, repo_dir: Path) -> str:
+        return ""
+
+    def commit_all(self, repo_dir: Path, message: str) -> bool:
+        return True
+
+    def push(self, repo: str, repo_dir: Path, branch: str) -> None:
+        return None
+
+    def ci_status(self, repo: str, branch: str) -> dict:
+        return {"state": "success"}
+
+    def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
+        return "https://github.test/pull/1"
+
+
 class SequencedLLM:
     def __init__(self) -> None:
         self.triage_calls = 0
@@ -340,6 +364,55 @@ class PipelineTests(unittest.TestCase):
             assert loaded is not None
             self.assertEqual(loaded.blocked_on, "budget")
             self.assertEqual(loaded.conversation["budget_pause"]["phase"], "triage")
+
+    def test_comment_limit_blocks_guardrail_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = replace(
+                Config.from_env(root=root, dry_run=False, mock_llm=True),
+                comment_limit=0,
+            )
+            tracker = FakeTracker(
+                title="Add OAuth login",
+                body="Implement authentication for the app.",
+            )
+            processor = IssueProcessor(
+                config=config,
+                store=StateStore(config.db_path),
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=SequencedLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "comment limit reached"):
+                processor.process("owner/repo", 1)
+
+            self.assertEqual(tracker.comments, [])
+
+    def test_comment_limit_blocks_clarification_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = replace(
+                Config.from_env(root=root, dry_run=False, mock_llm=True),
+                comment_limit=0,
+            )
+            tracker = FakeTracker()
+            processor = IssueProcessor(
+                config=config,
+                store=StateStore(config.db_path),
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=SequencedLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "comment limit reached"):
+                processor.process("owner/repo", 1)
+
+            self.assertEqual(tracker.comments, [])
 
     def test_clarification_reply_reruns_triage_once_without_second_question(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
