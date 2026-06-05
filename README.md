@@ -213,7 +213,7 @@ The prototype enforces these guardrails:
 - Treats model-authored Git paths literally during scoped diff and commit operations, so Git pathspec magic cannot broaden the selected files.
 - Truncates long clarification strings in draft PR assumptions while keeping the JSON valid.
 - Uses Markdown delimiters that cannot be closed by generated assumptions, verification commands, test output, or formatted repo context.
-- Redacts token-like values from CLI, doctor output, GitHub command, GitHub HTTP/network, GitHub write payloads, LLM prompt issue text, repo context, review diffs, and provider errors, SQLite state, abandoned-state, sandbox failure output, verification-output, PR body, audit, and issue-comment messages.
+- Redacts token-like values from CLI, doctor output, GitHub command, GitHub HTTP/network, GitHub write payloads, LLM prompt issue text, repo context, review diffs before truncation, and provider errors, SQLite state, abandoned-state, sandbox failure output, verification-output, PR body, audit, and issue-comment messages.
 - Caps issue comments per processed issue with nonnegative `COMMENT_LIMIT_PER_RUN`.
 - Persists posted comment ids before audit and label metadata, preventing duplicate clarification comments after a local metadata failure.
 - Records comment-audit failures as state warnings without undoing posted clarification, guardrail, or budget comments.

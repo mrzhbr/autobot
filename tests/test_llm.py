@@ -158,6 +158,20 @@ class LLMTests(unittest.TestCase):
         self.assertNotIn(token, prompt)
         self.assertIn("+TOKEN=[redacted-secret]", prompt)
 
+    def test_review_prompt_redacts_diff_before_truncating(self) -> None:
+        llm = _llm()
+        token = "ghp_" + ("A" * 36)
+        marker = "+TOKEN="
+        visible_prefix = token[:12]
+        padding = "x" * (30000 - len(marker) - len(visible_prefix))
+
+        llm.review("security", _issue(), padding + marker + token)
+
+        _, _, prompt = llm.calls[-1]
+        self.assertNotIn("ghp_", prompt)
+        self.assertNotIn(visible_prefix, prompt)
+        self.assertIn(marker + "[redacted-", prompt)
+
     def test_http_llm_infers_anthropic_provider_from_only_anthropic_key(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmp,
