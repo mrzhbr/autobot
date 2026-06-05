@@ -114,6 +114,8 @@ def _llm_key_check(config: Config) -> CheckResult:
     if config.mock_llm or config.dry_run:
         return CheckResult("llm key", "skip", "mock or dry-run mode does not need an LLM key")
     provider = config.llm_provider
+    if provider not in {None, "openai", "anthropic"}:
+        return CheckResult("llm key", "fail", "LLM_PROVIDER must be openai or anthropic")
     if provider == "openai":
         return _env_key_check("llm key", "OPENAI_API_KEY")
     if provider == "anthropic":

@@ -79,6 +79,22 @@ class CliTests(unittest.TestCase):
         processor.assert_not_called()
         self.assertIn("OPENAI_API_KEY is required", stderr.getvalue())
 
+    def test_live_run_rejects_unknown_llm_provider_before_processor(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"GITHUB_TOKEN": "x", "LLM_PROVIDER": "bogus", "OPENAI_API_KEY": "x"},
+                clear=True,
+            ),
+            patch("autobot.cli._processor") as processor,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 1)
+        processor.assert_not_called()
+        self.assertIn("LLM_PROVIDER must be openai or anthropic", stderr.getvalue())
+
     def test_live_watch_fails_before_tracker_without_llm_key(self) -> None:
         with (
             patch.dict("os.environ", {"GITHUB_TOKEN": "x"}, clear=True),

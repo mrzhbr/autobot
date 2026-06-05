@@ -35,6 +35,8 @@ export REVIEW_MODEL=gpt-4.1
 export REVIEW_MODELS=gpt-4.1,claude-sonnet-4-20250514
 ```
 
+`LLM_PROVIDER` may be unset, `openai`, or `anthropic`; any other value fails preflight before processing an issue.
+
 Anthropic can be used instead:
 
 ```sh

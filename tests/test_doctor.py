@@ -96,6 +96,18 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["docker"].status, "fail")
             self.assertIn("docker missing", by_name["docker"].message)
 
+    def test_live_doctor_rejects_unknown_llm_provider(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x", "LLM_PROVIDER": "bogus"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["llm key"].status, "fail")
+            self.assertIn("LLM_PROVIDER must be openai or anthropic", by_name["llm key"].message)
+
     def test_live_doctor_warns_when_sandbox_network_allows_egress(self) -> None:
         env = {
             "GITHUB_TOKEN": "x",

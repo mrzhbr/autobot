@@ -116,6 +116,8 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
 def _ensure_live_llm_key(config: Config) -> None:
     if config.dry_run or config.mock_llm:
         return
+    if config.llm_provider not in {None, "openai", "anthropic"}:
+        raise RuntimeError("LLM_PROVIDER must be openai or anthropic")
     if config.llm_provider == "openai" and not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is required")
     if config.llm_provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
