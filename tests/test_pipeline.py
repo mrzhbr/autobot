@@ -523,6 +523,13 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result.state, IssueState.PR_OPEN)
             self.assertEqual(setup_command[-1], "npm ci")
             self.assertIn(["docker", "rm", "-f"], [command[:3] for command in commands])
+            cleanup_index = next(
+                index
+                for index, command in enumerate(commands)
+                if command[:3] == ["docker", "rm", "-f"]
+            )
+            git_index = next(index for index, command in enumerate(commands) if command[0] == "git")
+            self.assertLess(cleanup_index, git_index)
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

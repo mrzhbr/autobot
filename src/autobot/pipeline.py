@@ -344,6 +344,7 @@ class IssueProcessor:
                 record.cost = ledger.to_dict()
                 self.store.upsert(record)
                 return "dry-run://draft-pr"
+            sandbox.close()
             return finalize_draft_pr(
                 issue,
                 record,
