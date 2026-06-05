@@ -164,7 +164,7 @@ The prototype enforces these guardrails:
 - Persists posted comment ids before audit and label metadata, preventing duplicate clarification comments after a local metadata failure.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.
 - Creates those GitHub labels on first use if the target repo does not already have them, tolerating concurrent creation.
-- Records label failures in state and audit without undoing an already-posted comment or opened draft PR.
+- Records label and label-audit failures in state without undoing an already-posted comment or opened draft PR.
 - Records push and draft-PR audit failures as state warnings without abandoning successful outward actions.
 - Records outward comments, labels, pushes, and draft PRs to the audit log.
 

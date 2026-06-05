@@ -86,6 +86,12 @@ class OutwardAuditFail:
             raise RuntimeError(f"{action} audit failed")
 
 
+class LabelAuditFail:
+    def record(self, action: str, repo: str, issue_number: int, details: dict) -> None:
+        if action == "label":
+            raise RuntimeError("label audit failed")
+
+
 class FakeGitHost:
     def clone(self, repo: str, target_dir: Path) -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -618,6 +624,38 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(
                 [warning["action"] for warning in loaded.conversation["audit_warnings"]],
                 ["push", "draft_pr"],
+            )
+
+    def test_label_audit_failure_does_not_abandon_opened_pr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=LabelAuditFail(),
+            )
+
+            with patch("autobot.sandbox.subprocess.run", return_value=completed):
+                result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.PR_OPEN)
+            self.assertIn(
+                {"action": "label", "error": "label audit failed"},
+                [
+                    {"action": warning["action"], "error": warning["error"]}
+                    for warning in loaded.conversation["audit_warnings"]
+                ],
             )
 
     def test_waiting_label_failure_keeps_clarification_state(self) -> None:

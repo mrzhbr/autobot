@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from autobot.adapters import IssueTracker
-from autobot.audit import AuditLog
+from autobot.audit import AuditLog, record_best_effort
 from autobot.models import Issue, IssueRecord, utc_now
 from autobot.scanner import redact_secret_like_values
 
@@ -20,6 +20,13 @@ def set_issue_label(
         record.conversation.setdefault("label_warnings", []).append(
             {"label": label, "error": error, "at": utc_now()}
         )
-        audit.record("label_failed", issue.repo, issue.number, {"label": label, "error": error})
+        record_best_effort(
+            audit,
+            "label_failed",
+            issue.repo,
+            issue.number,
+            {"label": label, "error": error},
+            record,
+        )
         return
-    audit.record("label", issue.repo, issue.number, {"label": label})
+    record_best_effort(audit, "label", issue.repo, issue.number, {"label": label}, record)
