@@ -227,6 +227,16 @@ class LLMTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_parse_json_wraps_and_redacts_malformed_embedded_json(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        with self.assertRaises(LLMError) as raised:
+            _parse_json(f"prefix {{bad: '{token}'}} suffix")
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
+        self.assertIn("model returned malformed JSON", str(raised.exception))
+
     def test_openai_http_errors_are_redacted(self) -> None:
         token = "sk-" + ("A" * 40)
         error = urllib.error.HTTPError(

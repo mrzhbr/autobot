@@ -319,7 +319,11 @@ def _parse_json(text: str) -> dict[str, Any]:
         if not match:
             snippet = redact_secret_like_values(text[:200])
             raise LLMError(f"model did not return JSON: {snippet}") from exc
-        return json.loads(match.group(0))
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError as nested_exc:
+            snippet = redact_secret_like_values(match.group(0)[:200])
+            raise LLMError(f"model returned malformed JSON: {snippet}") from nested_exc
 
 
 def _comments(issue: Issue) -> str:
