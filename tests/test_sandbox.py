@@ -117,6 +117,22 @@ class SandboxTests(unittest.TestCase):
             self.assertNotIn(token, str(raised.exception))
             self.assertIn("secret-like values found in proposed changes", str(raised.exception))
 
+    def test_docker_run_redacts_failed_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            token = "ghp_" + ("A" * 36)
+            failed = SimpleNamespace(returncode=1, stdout=f"bad {token}\n", stderr="")
+
+            with (
+                patch("autobot.sandbox.subprocess.run", return_value=failed),
+                self.assertRaises(SandboxError) as raised,
+            ):
+                DockerSandbox(repo, "python:3.12-slim").run("pytest")
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
+
     def test_docker_prepare_rejects_secret_like_setup_command_before_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
@@ -168,6 +184,22 @@ class SandboxTests(unittest.TestCase):
             self.assertFalse((root / "README.md").exists())
             self.assertNotIn(token, str(raised.exception))
             self.assertIn("secret-like values found in proposed changes", str(raised.exception))
+
+    def test_local_sandbox_run_redacts_failed_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            token = "ghp_" + ("A" * 36)
+            failed = SimpleNamespace(returncode=1, stdout="", stderr=f"bad {token}\n")
+
+            with (
+                patch("autobot.sandbox.subprocess.run", return_value=failed),
+                self.assertRaises(SandboxError) as raised,
+            ):
+                LocalSandbox(root).run("pytest")
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
 
 
 if __name__ == "__main__":

@@ -93,7 +93,7 @@ class DockerSandbox:
         cmd.extend([self.image, *args])
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
         if result.returncode != 0:
-            output = (result.stdout + "\n" + result.stderr).strip()
+            output = redact_secret_like_values((result.stdout + "\n" + result.stderr).strip())
             raise SandboxError(output or "sandbox command failed")
         return result.stdout.strip()
 
@@ -131,7 +131,8 @@ class LocalSandbox:
             check=False,
         )
         if result.returncode != 0:
-            raise SandboxError((result.stdout + "\n" + result.stderr).strip())
+            output = redact_secret_like_values((result.stdout + "\n" + result.stderr).strip())
+            raise SandboxError(output or "sandbox command failed")
         return result.stdout.strip()
 
 
