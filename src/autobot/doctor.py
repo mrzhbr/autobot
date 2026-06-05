@@ -223,6 +223,8 @@ def _sandbox_image_check(config: Config) -> CheckResult:
 def _sandbox_network_check(config: Config) -> CheckResult:
     if config.dry_run:
         return CheckResult("sandbox network", "skip", "dry-run does not start Docker")
+    if not config.sandbox_network.strip():
+        return CheckResult("sandbox network", "fail", "SANDBOX_NETWORK must not be empty")
     if config.sandbox_network == "none":
         return CheckResult("sandbox network", "pass", "none")
     return CheckResult(

@@ -292,6 +292,22 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["sandbox network"].status, "warn")
             self.assertIn("egress", by_name["sandbox network"].message)
 
+    def test_live_doctor_fails_when_sandbox_network_is_empty(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "SANDBOX_NETWORK": "",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["sandbox network"].status, "fail")
+            self.assertIn("SANDBOX_NETWORK must not be empty", by_name["sandbox network"].message)
+
     def test_live_doctor_reports_configured_sandbox_setup_command(self) -> None:
         env = {
             "GITHUB_TOKEN": "x",
