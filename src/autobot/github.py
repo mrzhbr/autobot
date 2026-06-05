@@ -252,17 +252,26 @@ class GitHubGitHost:
 
     def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         default_branch = self._default_branch(repo)
-        data = GitHubIssueTracker(self.token, None)._request(
-            "POST",
-            f"/repos/{repo}/pulls",
-            {
-                "title": redact_secret_like_values(title),
-                "head": branch,
-                "base": default_branch,
-                "body": redact_secret_like_values(body),
-                "draft": True,
-            },
-        )
+        tracker = GitHubIssueTracker(self.token, None)
+        try:
+            data = tracker._request(
+                "POST",
+                f"/repos/{repo}/pulls",
+                {
+                    "title": redact_secret_like_values(title),
+                    "head": branch,
+                    "base": default_branch,
+                    "body": redact_secret_like_values(body),
+                    "draft": True,
+                },
+            )
+        except GitHubError as exc:
+            if exc.status_code != 422:
+                raise
+            existing_url = self._existing_draft_pr_url(tracker, repo, branch, default_branch)
+            if existing_url:
+                return existing_url
+            raise
         return data["html_url"]
 
     def ci_status(self, repo: str, branch: str) -> dict:
@@ -293,6 +302,23 @@ class GitHubGitHost:
     def _default_branch(self, repo: str) -> str:
         data = GitHubIssueTracker(self.token, None)._request("GET", f"/repos/{repo}")
         return data.get("default_branch") or "main"
+
+    def _existing_draft_pr_url(
+        self,
+        tracker: GitHubIssueTracker,
+        repo: str,
+        branch: str,
+        default_branch: str,
+    ) -> str | None:
+        owner = repo.split("/", 1)[0]
+        query = urllib.parse.urlencode(
+            {"state": "open", "head": f"{owner}:{branch}", "base": default_branch}
+        )
+        pulls = tracker._request_all_list_pages(f"/repos/{repo}/pulls?{query}")
+        for pull in pulls:
+            if pull.get("draft") is True and pull.get("html_url"):
+                return str(pull["html_url"])
+        return None
 
     def _auth_git_prefix(self) -> list[str]:
         return ["git", *self._auth_config()]

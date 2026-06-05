@@ -134,6 +134,10 @@ If implementation or PR creation fails unexpectedly, the issue is marked `abando
 
 If a draft PR is already recorded in state, reruns return the stored PR URL before cloning the repository again.
 
+If GitHub reports that the pushed branch already has an open PR before the state row
+has a stored URL, the adapter reuses that PR only when GitHub still marks it as a
+draft.
+
 ## Adapters
 
 Implemented defaults:

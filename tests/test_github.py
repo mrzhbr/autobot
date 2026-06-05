@@ -51,6 +51,31 @@ class RecordingTracker:
         return {"html_url": "https://github.test/pull/1"}
 
 
+class DuplicateDraftPrTracker:
+    requests: list[tuple[str, str, dict | None]] = []
+    draft: bool = True
+
+    def __init__(self, token: str | None, agent_login: str | None) -> None:
+        self.token = token
+        self.agent_login = agent_login
+        self._last_response_headers: dict[str, str] = {}
+
+    def _request(self, method: str, path: str, body: dict | None = None):
+        self.requests.append((method, path, body))
+        self._last_response_headers = {}
+        if method == "POST" and path == "/repos/owner/repo/pulls":
+            raise GitHubError("Validation Failed", status_code=422)
+        if method == "GET" and path.startswith("/repos/owner/repo/pulls?"):
+            return [{"id": 1, "draft": self.draft, "html_url": "https://github.test/pull/7"}]
+        raise AssertionError(path)
+
+    def _request_all_list_pages(self, path: str):
+        data = self._request("GET", f"{path}&per_page=100&page=1")
+        if not isinstance(data, list):
+            raise AssertionError(path)
+        return data
+
+
 class CITracker:
     requests: list[tuple[str, str, dict | None]] = []
     responses: dict[str, dict] = {}
@@ -228,6 +253,8 @@ class LabelTracker(GitHubIssueTracker):
 class GitHubSafetyTests(unittest.TestCase):
     def setUp(self) -> None:
         RecordingTracker.requests = []
+        DuplicateDraftPrTracker.requests = []
+        DuplicateDraftPrTracker.draft = True
         CITracker.requests = []
         CITracker.responses = {}
         CITracker.errors = {}
@@ -371,6 +398,31 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, body["body"])
         self.assertIn("[redacted-secret]", body["title"])
         self.assertIn("[redacted-secret]", body["body"])
+
+    def test_open_pull_request_reuses_existing_draft_pr_for_branch(self) -> None:
+        host = RecordingGitHost()
+
+        with patch("autobot.github.GitHubIssueTracker", DuplicateDraftPrTracker):
+            url = host.open_draft_pr("owner/repo", "autobot/issue-1", "Draft: title", "body")
+
+        self.assertEqual(url, "https://github.test/pull/7")
+        self.assertEqual(DuplicateDraftPrTracker.requests[0][0], "POST")
+        method, path, body = DuplicateDraftPrTracker.requests[1]
+        self.assertEqual(method, "GET")
+        self.assertIn("state=open", path)
+        self.assertIn("head=owner%3Aautobot%2Fissue-1", path)
+        self.assertIn("base=main", path)
+        self.assertIsNone(body)
+
+    def test_open_pull_request_does_not_reuse_existing_ready_pr(self) -> None:
+        DuplicateDraftPrTracker.draft = False
+        host = RecordingGitHost()
+
+        with (
+            patch("autobot.github.GitHubIssueTracker", DuplicateDraftPrTracker),
+            self.assertRaisesRegex(GitHubError, "Validation Failed"),
+        ):
+            host.open_draft_pr("owner/repo", "autobot/issue-1", "Draft: title", "body")
 
     def test_ci_status_combines_commit_statuses_and_check_runs(self) -> None:
         CITracker.responses = {
