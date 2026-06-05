@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from autobot.models import IssueRecord, IssueState, utc_now
+from autobot.scanner import redact_secret_like_values
 
 
 class StateStore:
@@ -88,14 +89,14 @@ class StateStore:
                     record.repo,
                     record.issue_number,
                     record.state.value,
-                    json.dumps(record.conversation, sort_keys=True),
-                    record.branch,
-                    json.dumps(record.plan, sort_keys=True),
-                    json.dumps(record.cost, sort_keys=True),
-                    record.blocked_on,
+                    json.dumps(_sanitize(record.conversation), sort_keys=True),
+                    _sanitize(record.branch),
+                    json.dumps(_sanitize(record.plan), sort_keys=True),
+                    json.dumps(_sanitize(record.cost), sort_keys=True),
+                    _sanitize(record.blocked_on),
                     record.review_rounds,
-                    json.dumps(record.files_touched, sort_keys=True),
-                    record.pr_url,
+                    json.dumps(_sanitize(record.files_touched), sort_keys=True),
+                    _sanitize(record.pr_url),
                     record.created_at,
                     record.updated_at,
                 ),
@@ -138,3 +139,13 @@ def _ensure_column(conn: sqlite3.Connection, table: str, name: str, definition: 
     columns = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
     if name not in columns:
         conn.execute(f"alter table {table} add column {name} {definition}")
+
+
+def _sanitize(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _sanitize(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize(item) for item in value]
+    if isinstance(value, str):
+        return redact_secret_like_values(value)
+    return value
