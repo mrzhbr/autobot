@@ -125,8 +125,9 @@ seen -> triaged -> needs_spec -> asked -> waiting -> resumed -> spec_ready
 If triage returns `ready: false`, the agent posts one comment with up to three questions, stores the comment id, marks the issue `agent-waiting`, and exits. On the next `run` or `watch`, comments with ids greater than the stored question comment and not authored by the bot are folded into the issue record before triage is rerun.
 
 If a human reply still leaves the issue underspecified, the agent records that result,
-advances the resume marker past the processed reply, and waits for a new human
-comment instead of reprocessing the same answer.
+keeps the processed replies in the issue record, advances the resume marker past
+the latest reply, and waits for a new human comment instead of reprocessing the
+same answer.
 
 Dry-run waiting uses the current newest issue comment id as its resume marker, so historical comments are not treated as replies to a question that dry-run did not post.
 

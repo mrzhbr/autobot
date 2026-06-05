@@ -23,7 +23,7 @@ def latest_comment_id(issue: Issue) -> int:
 
 def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bool:
     resume_after = resume_after_comment_id(record)
-    replies = [
+    new_replies = [
         {
             "id": comment.id,
             "author": comment.author,
@@ -33,9 +33,9 @@ def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bo
         for comment in issue.comments
         if comment.id > resume_after and comment.author != bot
     ]
-    if not replies:
+    if not new_replies:
         return False
-    record.conversation["human_replies"] = replies
+    record.conversation["human_replies"] = _append_human_replies(record, new_replies)
     record.transition(IssueState.RESUMED)
     record.blocked_on = None
     return True
@@ -88,3 +88,20 @@ def mark_clarification_still_needed(
         record.conversation["resume_after_comment_id"] = max(reply_ids)
     record.blocked_on = "clarification"
     record.transition(IssueState.WAITING)
+
+
+def _append_human_replies(
+    record: IssueRecord,
+    new_replies: list[dict],
+) -> list[dict]:
+    replies = [
+        reply for reply in record.conversation.get("human_replies", []) if isinstance(reply, dict)
+    ]
+    seen_ids = {int(reply.get("id") or 0) for reply in replies}
+    for reply in new_replies:
+        reply_id = int(reply.get("id") or 0)
+        if reply_id in seen_ids:
+            continue
+        replies.append(reply)
+        seen_ids.add(reply_id)
+    return replies

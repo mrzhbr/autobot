@@ -1114,6 +1114,43 @@ class PipelineTests(unittest.TestCase):
                 ["Still unclear."],
             )
 
+    def test_clarification_replies_accumulate_across_resumes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker()
+            store = StateStore(config.db_path)
+            llm = CommentAwareLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = processor.process("owner/repo", 1)
+            tracker.comments.append(
+                IssueComment(1, "alice", "Not enough detail.", "2026-06-05T00:01:00Z")
+            )
+            second = processor.process("owner/repo", 1)
+            tracker.comments.append(
+                IssueComment(2, "alice", "Use the compact option.", "2026-06-05T00:02:00Z")
+            )
+            third = processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(third.state, IssueState.PR_OPEN)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(
+                [reply["id"] for reply in loaded.conversation["human_replies"]],
+                [1, 2],
+            )
+
     def test_out_of_scope_issue_pauses_before_implementation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
