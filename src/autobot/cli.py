@@ -9,6 +9,7 @@ from pathlib import Path
 from autobot.audit import AuditLog
 from autobot.chat import IssueCommentChat
 from autobot.config import Config
+from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
 from autobot.llm import build_llm
 from autobot.pipeline import IssueProcessor
@@ -26,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run(args)
         if args.command == "watch":
             return _watch(args)
+        if args.command == "doctor":
+            return _doctor(args)
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -56,6 +59,17 @@ def _watch(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+def _doctor(args: argparse.Namespace) -> int:
+    config = _config(args, require_github=False)
+    checks = run_doctor(config, args.repo, args.issue, network=not args.no_network)
+    payload = {
+        "ok": doctor_ok(checks),
+        "checks": [check.to_dict() for check in checks],
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0 if payload["ok"] else 1
+
+
 def _processor(config: Config, tracker: GitHubIssueTracker | None = None) -> IssueProcessor:
     store = StateStore(config.db_path)
     tracker = tracker or GitHubIssueTracker(config.github_token, config.agent_login)
@@ -81,7 +95,7 @@ def _summary(repo: str, issue: int, result) -> dict:
     }
 
 
-def _config(args: argparse.Namespace) -> Config:
+def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
     config = Config.from_env(
         root=Path.cwd(),
         db_path=args.db,
@@ -89,7 +103,7 @@ def _config(args: argparse.Namespace) -> Config:
         dry_run=args.dry_run,
         mock_llm=args.mock_llm,
     )
-    if not config.github_token and not config.dry_run:
+    if require_github and not config.github_token and not config.dry_run:
         raise RuntimeError("GITHUB_TOKEN is required for live runs")
     return config
 
@@ -108,6 +122,12 @@ def _parser() -> argparse.ArgumentParser:
     watch.add_argument("--interval", type=int, default=60, help="Polling interval in seconds")
     watch.add_argument("--once", action="store_true", help="Poll once and exit")
     _common(watch)
+
+    doctor = subcommands.add_parser("doctor", help="Check live-run prerequisites")
+    doctor.add_argument("--repo", help="GitHub repository in owner/name form")
+    doctor.add_argument("--issue", type=int, help="GitHub issue number")
+    doctor.add_argument("--no-network", action="store_true", help="Skip GitHub issue readability")
+    _common(doctor)
     return parser
 
 

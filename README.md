@@ -73,6 +73,12 @@ Poll continuously:
 ./cli watch --repo owner/name --interval 60
 ```
 
+Check live-run prerequisites without posting comments, pushing branches, or opening PRs:
+
+```sh
+./cli doctor --repo owner/name --issue 123
+```
+
 Run a local dry-run against a public issue body:
 
 ```sh
