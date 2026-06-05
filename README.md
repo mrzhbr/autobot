@@ -173,6 +173,10 @@ Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across m
 the prototype stopping rule that a draft PR cannot open without review and that
 the review loop stops after at most three rounds.
 
+`MAX_ISSUE_TOKENS`, `MAX_ISSUE_DOLLARS`, and `COMMENT_LIMIT_PER_RUN` must be
+nonnegative. A comment limit of `0` is allowed and prevents outbound issue
+comments for that run.
+
 Each review round stores its structured reviewer reports and blocking findings in
 the issue record so the durable state shows what the reviewers accepted or asked
 the implementer to fix.
@@ -194,7 +198,7 @@ The prototype enforces these guardrails:
 - Scans issue text before triage, proposed changes before disk writes, verification commands before execution, and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.
 - Includes untracked generated files in review and secret-scan diffs before committing.
 - Redacts token-like values from CLI, GitHub command, GitHub HTTP/network, GitHub write payloads, LLM provider, doctor issue-read, SQLite state, abandoned-state, sandbox failure output, verification-output, PR body, audit, and issue-comment messages.
-- Caps issue comments per processed issue with `COMMENT_LIMIT_PER_RUN`.
+- Caps issue comments per processed issue with nonnegative `COMMENT_LIMIT_PER_RUN`.
 - Persists posted comment ids before audit and label metadata, preventing duplicate clarification comments after a local metadata failure.
 - Records comment-audit failures as state warnings without undoing posted clarification, guardrail, or budget comments.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.

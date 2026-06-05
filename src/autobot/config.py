@@ -69,9 +69,9 @@ class Config:
             sandbox_setup_command=os.getenv("SANDBOX_SETUP_COMMAND"),
             default_test_command=os.getenv("AUTO_TEST_COMMAND"),
             max_review_rounds=_bounded_int("MAX_REVIEW_ROUNDS", "3", minimum=1, maximum=3),
-            max_issue_tokens=_optional_int(os.getenv("MAX_ISSUE_TOKENS")),
-            max_issue_dollars=_optional_float(os.getenv("MAX_ISSUE_DOLLARS")),
-            comment_limit=int(os.getenv("COMMENT_LIMIT_PER_RUN", "2")),
+            max_issue_tokens=_optional_nonnegative_int("MAX_ISSUE_TOKENS"),
+            max_issue_dollars=_optional_nonnegative_float("MAX_ISSUE_DOLLARS"),
+            comment_limit=_bounded_int("COMMENT_LIMIT_PER_RUN", "2", minimum=0),
             dry_run=dry_run,
             mock_llm=mock_llm or os.getenv("AUTOBOT_MOCK_LLM") == "1",
         )
@@ -183,19 +183,50 @@ def _default_model(provider: str | None) -> str:
     return OPENAI_DEFAULT_MODEL
 
 
-def _optional_int(value: str | None) -> int | None:
-    return int(value) if value else None
+def _optional_nonnegative_int(name: str) -> int | None:
+    value = os.getenv(name)
+    if not value:
+        return None
+    parsed = _parse_int(name, value)
+    if parsed < 0:
+        raise ValueError(f"{name} must be nonnegative")
+    return parsed
 
 
-def _optional_float(value: str | None) -> float | None:
-    return float(value) if value else None
+def _optional_nonnegative_float(name: str) -> float | None:
+    value = os.getenv(name)
+    if not value:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be nonnegative")
+    return parsed
 
 
-def _bounded_int(name: str, default: str, minimum: int, maximum: int) -> int:
-    value = int(os.getenv(name, default))
-    if value < minimum or value > maximum:
+def _bounded_int(
+    name: str,
+    default: str,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    value = _parse_int(name, os.getenv(name, default))
+    if value < minimum:
+        if maximum is None:
+            raise ValueError(f"{name} must be at least {minimum}")
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    if maximum is not None and value > maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return value
+
+
+def _parse_int(name: str, value: str) -> int:
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 def _model_list(value: str | None, fallback: str) -> list[str]:

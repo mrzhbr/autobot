@@ -231,6 +231,47 @@ class SupportTests(unittest.TestCase):
         ):
             Config.from_env(Path(tmp))
 
+    def test_config_allows_zero_comment_limit(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"COMMENT_LIMIT_PER_RUN": "0"}, clear=True),
+        ):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.comment_limit, 0)
+
+    def test_config_rejects_negative_comment_limit(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"COMMENT_LIMIT_PER_RUN": "-1"}, clear=True),
+            self.assertRaisesRegex(ValueError, "COMMENT_LIMIT_PER_RUN must be at least 0"),
+        ):
+            Config.from_env(Path(tmp))
+
+    def test_config_rejects_negative_token_budget(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"MAX_ISSUE_TOKENS": "-1"}, clear=True),
+            self.assertRaisesRegex(ValueError, "MAX_ISSUE_TOKENS must be nonnegative"),
+        ):
+            Config.from_env(Path(tmp))
+
+    def test_config_rejects_negative_dollar_budget(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"MAX_ISSUE_DOLLARS": "-0.01"}, clear=True),
+            self.assertRaisesRegex(ValueError, "MAX_ISSUE_DOLLARS must be nonnegative"),
+        ):
+            Config.from_env(Path(tmp))
+
+    def test_config_names_malformed_numeric_env_vars(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"MAX_ISSUE_TOKENS": "many"}, clear=True),
+            self.assertRaisesRegex(ValueError, "MAX_ISSUE_TOKENS must be an integer"),
+        ):
+            Config.from_env(Path(tmp))
+
     def test_config_defaults_to_anthropic_model_for_anthropic_key(self) -> None:
         with (
             TemporaryDirectory() as tmp,
