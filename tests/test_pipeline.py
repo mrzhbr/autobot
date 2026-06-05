@@ -105,7 +105,7 @@ class FakeGitHost:
     def create_branch(self, repo_dir: Path, branch: str) -> None:
         return None
 
-    def current_diff(self, repo_dir: Path) -> str:
+    def current_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
         return ""
 
     def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
@@ -139,6 +139,15 @@ class CommitPathGitHost(FakeGitHost):
         return True
 
 
+class DiffPathGitHost(FakeGitHost):
+    def __init__(self) -> None:
+        self.diff_paths: list[list[str] | None] = []
+
+    def current_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
+        self.diff_paths.append(paths)
+        return ""
+
+
 class PackageLockGitHost(FakeGitHost):
     def clone(self, repo: str, target_dir: Path) -> None:
         super().clone(repo, target_dir)
@@ -150,7 +159,7 @@ class SecretFailGitHost(FakeGitHost):
     def __init__(self, token: str) -> None:
         self.token = token
 
-    def current_diff(self, repo_dir: Path) -> str:
+    def current_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
         raise RuntimeError(f"git failed with {self.token}")
 
 
@@ -171,7 +180,7 @@ class SecretDiffGitHost(FakeGitHost):
     def __init__(self, token: str) -> None:
         self.token = token
 
-    def current_diff(self, repo_dir: Path) -> str:
+    def current_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
         return f"diff --git a/.env b/.env\n+GITHUB_TOKEN={self.token}\n"
 
 
@@ -698,6 +707,33 @@ class PipelineTests(unittest.TestCase):
 
             self.assertEqual(result.state, IssueState.PR_OPEN)
             self.assertEqual(git_host.commit_paths, ["tests/test_issue_1.py", "README.md"])
+
+    def test_live_pipeline_reviews_only_model_authored_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            git_host = DiffPathGitHost()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=git_host,
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with patch("autobot.sandbox.subprocess.run", return_value=completed):
+                result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(
+                git_host.diff_paths,
+                [["tests/test_issue_1.py", "README.md"], ["tests/test_issue_1.py", "README.md"]],
+            )
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

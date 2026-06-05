@@ -68,7 +68,7 @@ class ImplementationRunner:
                 sandbox.prepare()
             artifacts = self._test_and_implement(issue, record, ledger, repo_dir, sandbox)
             self._review_loop(issue, record, ledger, repo_dir, sandbox, artifacts)
-            self._scan_final_diff(repo_dir)
+            self._scan_final_diff(repo_dir, _unique_paths(artifacts.all_changes))
             if dry_run:
                 return self._finish_dry_run(record, ledger, artifacts.all_changes)
             sandbox.close()
@@ -163,7 +163,11 @@ class ImplementationRunner:
         panel = ReviewerPanel(self.llm, models=self.config.review_models)
         for round_number in range(1, self.config.max_review_rounds + 1):
             record.review_rounds = round_number
-            outcome = panel.review(issue, self._scan_final_diff(repo_dir), ledger)
+            outcome = panel.review(
+                issue,
+                self._scan_final_diff(repo_dir, _unique_paths(artifacts.all_changes)),
+                ledger,
+            )
             record.conversation.setdefault("review_reports", []).append(
                 review_round_artifact(round_number, outcome)
             )
@@ -205,8 +209,8 @@ class ImplementationRunner:
         self.store.upsert(record)
         return sandbox_ops.run_verification(sandbox, commands, dry_run)
 
-    def _scan_final_diff(self, repo_dir: Path) -> str:
-        diff = self.git_host.current_diff(repo_dir)
+    def _scan_final_diff(self, repo_dir: Path, paths: list[str]) -> str:
+        diff = self.git_host.current_diff(repo_dir, paths)
         ensure_no_secret_like_values(diff, "diff")
         return diff
 

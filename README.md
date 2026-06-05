@@ -204,8 +204,8 @@ The prototype enforces these guardrails:
 - Rejects secret-like values in configured sandbox setup commands before Docker execution.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
 - Scans issue text before triage, proposed changes before disk writes, verification commands before execution, and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.
-- Includes untracked generated files in review and secret-scan diffs before committing.
-- Stages only model-authored test, implementation, and review-fix paths for the final commit, avoiding sandbox setup byproducts.
+- Includes model-authored untracked files in review and secret-scan diffs before committing.
+- Scopes review, final secret scan, and final commit to model-authored test, implementation, and review-fix paths, avoiding sandbox setup byproducts.
 - Uses Markdown delimiters that cannot be closed by generated assumptions, verification commands, or test output when composing draft PR bodies.
 - Redacts token-like values from CLI, doctor output, GitHub command, GitHub HTTP/network, GitHub write payloads, LLM provider, SQLite state, abandoned-state, sandbox failure output, verification-output, PR body, audit, and issue-comment messages.
 - Caps issue comments per processed issue with nonnegative `COMMENT_LIMIT_PER_RUN`.

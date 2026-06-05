@@ -436,6 +436,28 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertIn("new file mode 100644", diff)
         self.assertIn("+def test_new():", diff)
 
+    def test_current_diff_filters_to_requested_untracked_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_dir = Path(tmp)
+            host = GitHubGitHost(None)
+            host._run(["git", "init"], cwd=repo_dir)
+            host._run(["git", "config", "user.email", "autobot@example.invalid"], cwd=repo_dir)
+            host._run(["git", "config", "user.name", "Autobot"], cwd=repo_dir)
+            (repo_dir / "README.md").write_text("# Repo\n", encoding="utf-8")
+            host._run(["git", "add", "README.md"], cwd=repo_dir)
+            host._run(["git", "commit", "-m", "chore: initial"], cwd=repo_dir)
+            (repo_dir / "tests").mkdir()
+            (repo_dir / "tests" / "test_new.py").write_text(
+                "def test_new():\n    pass\n", encoding="utf-8"
+            )
+            (repo_dir / "build").mkdir()
+            (repo_dir / "build" / "cache.txt").write_text("setup byproduct\n", encoding="utf-8")
+
+            diff = host.current_diff(repo_dir, ["tests/test_new.py"])
+
+        self.assertIn("diff --git a/tests/test_new.py b/tests/test_new.py", diff)
+        self.assertNotIn("build/cache.txt", diff)
+
     def test_open_pull_request_payload_is_always_draft(self) -> None:
         host = RecordingGitHost()
 

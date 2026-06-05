@@ -8,10 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from autobot.diffing import render_untracked_diff
+from autobot.git_safety import is_default_like_branch
 from autobot.models import Issue, IssueComment
 from autobot.scanner import redact_secret_like_values
-
-DEFAULT_BRANCHES = {"main", "master", "trunk", "develop"}
 
 
 class GitHubError(RuntimeError):
@@ -219,22 +218,30 @@ class GitHubGitHost:
             self._git(target_dir, ["clean", "-fdx"])
             return
         target_dir.parent.mkdir(parents=True, exist_ok=True)
-        cmd = self._auth_git_prefix() + ["clone", f"https://github.com/{repo}.git", str(target_dir)]
+        cmd = [
+            "git",
+            *self._auth_config(),
+            "clone",
+            f"https://github.com/{repo}.git",
+            str(target_dir),
+        ]
         self._run(cmd)
 
     def create_branch(self, repo_dir: Path, branch: str) -> None:
-        if _is_default_like_branch(branch):
+        if is_default_like_branch(branch):
             raise GitHubError(f"refusing to work on protected default-like branch: {branch}")
         self._git(repo_dir, ["checkout", "-B", branch])
 
-    def current_diff(self, repo_dir: Path) -> str:
-        stat = self._git(repo_dir, ["diff", "--stat", "HEAD"])
-        diff = self._git(repo_dir, ["diff", "HEAD"])
-        untracked = self._untracked_diff(repo_dir)
+    def current_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
+        suffix = [] if paths is None else ["--", *paths]
+        stat = self._git(repo_dir, ["diff", "--stat", "HEAD", *suffix])
+        diff = self._git(repo_dir, ["diff", "HEAD", *suffix])
+        untracked = self._untracked_diff(repo_dir, paths)
         return "\n".join(part for part in (stat, diff, untracked) if part)
 
-    def _untracked_diff(self, repo_dir: Path) -> str:
-        paths = self._git(repo_dir, ["ls-files", "--others", "--exclude-standard"]).splitlines()
+    def _untracked_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
+        if paths is None:
+            paths = self._git(repo_dir, ["ls-files", "--others", "--exclude-standard"]).splitlines()
         return render_untracked_diff(repo_dir, paths)
 
     def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
@@ -256,12 +263,12 @@ class GitHubGitHost:
         return True
 
     def push(self, repo: str, repo_dir: Path, branch: str) -> None:
-        if _is_default_like_branch(branch):
+        if is_default_like_branch(branch):
             raise GitHubError(f"refusing to push protected default-like branch: {branch}")
         self._git(repo_dir, self._auth_config() + ["push", "origin", branch])
 
     def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
-        if _is_default_like_branch(branch):
+        if is_default_like_branch(branch):
             raise GitHubError(f"refusing to open PR from protected default-like branch: {branch}")
         default_branch = self._default_branch(repo)
         tracker = GitHubIssueTracker(self.token, None)
@@ -332,9 +339,6 @@ class GitHubGitHost:
                 return str(pull["html_url"])
         return None
 
-    def _auth_git_prefix(self) -> list[str]:
-        return ["git", *self._auth_config()]
-
     def _auth_config(self) -> list[str]:
         if not self.token:
             return []
@@ -387,11 +391,3 @@ def _summarize_check_run(run: dict) -> dict:
         "conclusion": run.get("conclusion"),
         "html_url": run.get("html_url"),
     }
-
-
-def _is_default_like_branch(branch: str) -> bool:
-    candidates = [branch]
-    for separator in (":", "/", "refs/heads/"):
-        if separator in branch:
-            candidates.append(branch.rsplit(separator, 1)[-1])
-    return any(candidate in DEFAULT_BRANCHES for candidate in candidates)

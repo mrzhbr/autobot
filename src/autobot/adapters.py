@@ -33,8 +33,8 @@ class GitHost(Protocol):
     def create_branch(self, repo_dir: Path, branch: str) -> None:
         """Create and check out a working branch."""
 
-    def current_diff(self, repo_dir: Path) -> str:
-        """Return the working tree diff."""
+    def current_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
+        """Return the working tree diff, optionally limited to selected paths."""
 
     def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
         """Commit selected paths, or all changes when paths is omitted."""
