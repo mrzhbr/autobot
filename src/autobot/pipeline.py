@@ -254,12 +254,14 @@ class IssueProcessor:
         baseline = sandbox_ops.run_verification_allow_failure(
             sandbox, test_plan.test_commands, dry_run
         )
-
         plan = self.llm.implement(issue, gather_context(repo_dir, issue))
         ledger.add(plan.usage)
         self._pause_if_budget_hit(issue, record, ledger, "implementation")
         if not plan.changes:
             raise RuntimeError("implementer returned no changes")
+        merge = merge_verification_commands
+        all_changes = [*test_plan.changes, *plan.changes]
+        impl_commands = list(plan.test_commands)
         record.plan = {
             "acceptance_tests": test_plan.plan,
             "acceptance_test_baseline": baseline,
@@ -270,13 +272,8 @@ class IssueProcessor:
         }
         self.store.upsert(record)
         sandbox_ops.apply_changes(repo_dir, sandbox, plan.changes, dry_run)
-        detected_commands = detect_verification_commands(
-            repo_dir,
-            self.config.default_test_command,
-        )
-        verification_commands = merge_verification_commands(
-            test_plan.test_commands, plan.test_commands, detected_commands
-        )
+        detected = detect_verification_commands(repo_dir, self.config.default_test_command)
+        verification_commands = merge(test_plan.test_commands, impl_commands, detected)
         record.plan["verification_commands"] = verification_commands
         self.store.upsert(record)
         test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
@@ -303,15 +300,19 @@ class IssueProcessor:
             self._pause_if_budget_hit(issue, record, ledger, "review fix")
             if not fix.changes:
                 raise RuntimeError("implementer returned no fixes for blocking findings")
+            all_changes.extend(fix.changes)
+            impl_commands.extend(fix.test_commands)
             sandbox_ops.apply_changes(repo_dir, sandbox, fix.changes, dry_run)
+            verification_commands = merge(test_plan.test_commands, impl_commands, detected)
+            record.plan["verification_commands"] = verification_commands
+            self.store.upsert(record)
             test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
-
         diff = self.git_host.current_diff(repo_dir)
         secrets = find_secret_like_values(diff)
         if secrets:
             raise RuntimeError(f"secret-like values found in diff: {secrets[:3]}")
         if dry_run:
-            record.files_touched = [change.path for change in [*test_plan.changes, *plan.changes]]
+            record.files_touched = [change.path for change in all_changes]
             record.conversation["ci_status"] = {"state": "dry-run"}
             record.conversation["pr_url"] = "dry-run://draft-pr"
             record.transition(IssueState.PR_OPEN)

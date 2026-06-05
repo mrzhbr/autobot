@@ -17,6 +17,7 @@ from autobot.models import (
     Issue,
     IssueComment,
     IssueState,
+    ReviewFinding,
     ReviewReport,
     TriageDecision,
     Usage,
@@ -120,6 +121,46 @@ class AlwaysNotReadyLLM(SequencedLLM):
         return TriageDecision(False, ["Still unclear."], "The answer did not resolve the spec.")
 
 
+class BlockingFixLLM(SequencedLLM):
+    def __init__(self) -> None:
+        super().__init__()
+        self.review_calls = 0
+
+    def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
+        return TriageDecision(True, [], "Ready.")
+
+    def implement(
+        self,
+        issue: Issue,
+        context: list[ContextFile],
+        review_findings: list[str] | None = None,
+    ) -> ImplementationPlan:
+        if review_findings:
+            return ImplementationPlan(
+                plan=["Fix the blocking review finding."],
+                changes=[FileChange("docs/fix.md", "Fixed.\n")],
+                test_commands=["python -m pytest -q"],
+            )
+        return ImplementationPlan(
+            plan=["Write initial behavior."],
+            changes=[FileChange("README.md", "# Dry run repo\n\nImplemented.\n")],
+            test_commands=["true"],
+        )
+
+    def review(
+        self,
+        lens: str,
+        issue: Issue,
+        diff: str,
+        model: str | None = None,
+    ) -> ReviewReport:
+        self.review_calls += 1
+        if self.review_calls == 1:
+            finding = ReviewFinding("high", "README.md", 1, "Needs a follow-up fix.", True)
+            return ReviewReport(lens, [finding], Usage("review", model or "review", 0, 0, 0))
+        return ReviewReport(lens, [], Usage("review", model or "review", 0, 0, 0))
+
+
 class PipelineTests(unittest.TestCase):
     def test_waiting_state_resumes_after_human_reply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -165,6 +206,38 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.plan["acceptance_test_baseline"]["ok"], True)
             self.assertIn("dry-run skipped", loaded.plan["acceptance_test_baseline"]["output"])
             self.assertEqual(loaded.plan["verification_commands"], ["python -m pytest", "true"])
+
+    def test_review_fix_commands_and_files_are_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            llm = BlockingFixLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(result.review_rounds, 2)
+            self.assertEqual(
+                result.files_touched,
+                ["tests/test_issue_1.py", "README.md", "docs/fix.md"],
+            )
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(
+                loaded.plan["verification_commands"],
+                ["python -m pytest", "true", "python -m pytest -q"],
+            )
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
