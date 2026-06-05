@@ -42,6 +42,22 @@ class AuditLog:
         return value
 
 
+def record_best_effort(
+    audit: AuditLog,
+    action: str,
+    repo: str,
+    issue_number: int,
+    details: dict[str, Any],
+    record: Any,
+) -> None:
+    try:
+        audit.record(action, repo, issue_number, details)
+    except Exception as exc:
+        record.conversation.setdefault("audit_warnings", []).append(
+            {"action": action, "error": redact_secret_like_values(str(exc)), "at": utc_now()}
+        )
+
+
 def _sensitive_key(key: str) -> bool:
     normalized = key.lower().replace("-", "_")
     return any(marker in normalized for marker in SENSITIVE_KEYS)

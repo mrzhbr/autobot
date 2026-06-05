@@ -6,7 +6,7 @@ from pathlib import Path
 from autobot import resume
 from autobot import sandbox as sandbox_ops
 from autobot.adapters import LLM, ChatChannel, GitHost, IssueTracker
-from autobot.audit import AuditLog
+from autobot.audit import AuditLog, record_best_effort
 from autobot.config import Config
 from autobot.context import gather_context
 from autobot.cost import CostLedger
@@ -341,7 +341,7 @@ class IssueProcessor:
             raise RuntimeError("no changes to commit")
         branch = record.branch or branch_name(issue)
         self.git_host.push(issue.repo, repo_dir, branch)
-        self.audit.record("push", issue.repo, issue.number, {"branch": branch})
+        record_best_effort(self.audit, "push", issue.repo, issue.number, {"branch": branch}, record)
         ci_status = self.git_host.ci_status(issue.repo, branch)
         record.conversation["ci_status"] = ci_status
         pr_url = self.git_host.open_draft_pr(
@@ -353,7 +353,14 @@ class IssueProcessor:
         record.conversation["pr_url"] = pr_url
         record.pr_url = pr_url
         self.store.upsert(record)
-        self.audit.record("draft_pr", issue.repo, issue.number, {"url": pr_url, "branch": branch})
+        record_best_effort(
+            self.audit,
+            "draft_pr",
+            issue.repo,
+            issue.number,
+            {"url": pr_url, "branch": branch},
+            record,
+        )
         set_issue_label(self.tracker, self.audit, record, issue, "agent-pr-open")
         record.files_touched = changed_files(repo_dir)
         record.transition(IssueState.PR_OPEN)

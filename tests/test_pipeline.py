@@ -80,6 +80,12 @@ class CommentAuditFail:
             raise RuntimeError("audit write failed")
 
 
+class OutwardAuditFail:
+    def record(self, action: str, repo: str, issue_number: int, details: dict) -> None:
+        if action in {"push", "draft_pr"}:
+            raise RuntimeError(f"{action} audit failed")
+
+
 class FakeGitHost:
     def clone(self, repo: str, target_dir: Path) -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -102,6 +108,15 @@ class FakeGitHost:
 
     def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         return "https://github.test/pull/1"
+
+
+class CountingGitHost(FakeGitHost):
+    def __init__(self) -> None:
+        self.opened_prs = 0
+
+    def open_draft_pr(self, repo: str, branch: str, title: str, body: str) -> str:
+        self.opened_prs += 1
+        return super().open_draft_pr(repo, branch, title, body)
 
 
 class PackageLockGitHost(FakeGitHost):
@@ -506,6 +521,39 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(
                 loaded.conversation["label_warnings"][0]["label"],
                 "agent-pr-open",
+            )
+
+    def test_pr_audit_failure_does_not_abandon_opened_pr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            git_host = CountingGitHost()
+            completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=git_host,
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=OutwardAuditFail(),
+            )
+
+            with patch("autobot.sandbox.subprocess.run", return_value=completed):
+                first = processor.process("owner/repo", 1)
+                second = processor.process("owner/repo", 1)
+
+            self.assertEqual(first.state, IssueState.PR_OPEN)
+            self.assertEqual(second.message, "draft pull request already open")
+            self.assertEqual(git_host.opened_prs, 1)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.PR_OPEN)
+            self.assertEqual(
+                [warning["action"] for warning in loaded.conversation["audit_warnings"]],
+                ["push", "draft_pr"],
             )
 
     def test_waiting_label_failure_keeps_clarification_state(self) -> None:
