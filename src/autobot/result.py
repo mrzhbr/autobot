@@ -3,8 +3,23 @@ from __future__ import annotations
 import time
 
 from autobot.cost import CostLedger
-from autobot.models import IssueRecord, ProcessResult
+from autobot.models import IssueRecord, IssueState, ProcessResult
+from autobot.scanner import redact_secret_like_values
 from autobot.state import StateStore
+
+
+def abandon_process(
+    store: StateStore,
+    record: IssueRecord,
+    ledger: CostLedger,
+    exc: Exception,
+    started: float,
+) -> str:
+    message = redact_secret_like_values(str(exc))
+    record.transition(IssueState.ABANDONED)
+    record.blocked_on = message
+    finish_process(store, record, ledger, message, None, started)
+    return message
 
 
 def finish_process(

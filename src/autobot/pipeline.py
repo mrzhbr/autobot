@@ -14,9 +14,9 @@ from autobot.guardrails import detect_out_of_scope, guardrail_question
 from autobot.labels import set_issue_label
 from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_now
 from autobot.pr_flow import finalize_draft_pr
-from autobot.result import finish_process
+from autobot.result import abandon_process, finish_process
 from autobot.review import ReviewerPanel, format_blockers
-from autobot.scanner import ensure_no_secret_like_values, redact_secret_like_values
+from autobot.scanner import ensure_no_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import detect_verification_commands, merge_verification_commands
 from autobot.workspace import branch_name, prepare_dry_run_repo, repo_work_dir
@@ -95,54 +95,50 @@ class IssueProcessor:
         if topics and "guardrail_pause" not in record.conversation:
             return self._pause_for_guardrail(issue, record, ledger, topics, started)
 
-        repo_dir = self._clone_and_branch(issue, record)
-        context = gather_context(repo_dir, issue)
-
-        if record.state not in {
-            IssueState.SPEC_READY,
-            IssueState.IMPLEMENTING,
-            IssueState.REVIEW_LOOP,
-            IssueState.PR_OPEN,
-        }:
-            triage = self.llm.triage(issue, context)
-            ledger.add(triage.usage)
-            record.transition(IssueState.TRIAGED)
-            record.conversation["triage"] = {
-                "ready": triage.ready,
-                "questions": triage.questions,
-                "reason": triage.reason,
-                "at": utc_now(),
-            }
-            self.store.upsert(record)
-            try:
-                self._pause_if_budget_hit(issue, record, ledger, "triage")
-            except resume.PausedForHuman as exc:
-                return finish_process(self.store, record, ledger, str(exc), None, started)
-            if not triage.ready:
-                if resumed and previous_blocked_on == "clarification":
-                    resume.mark_clarification_still_needed(record, triage.questions, triage.reason)
-                    self.store.upsert(record)
-                    return finish_process(
-                        self.store,
-                        record,
-                        ledger,
-                        "still needs clarification after reply",
-                        None,
-                        started,
-                    )
-                return self._ask_and_wait(issue, record, ledger, triage.questions, started)
-            record.transition(IssueState.SPEC_READY)
-            self.store.upsert(record)
-
         try:
+            repo_dir = self._clone_and_branch(issue, record)
+            context = gather_context(repo_dir, issue)
+
+            if record.state not in {
+                IssueState.SPEC_READY,
+                IssueState.IMPLEMENTING,
+                IssueState.REVIEW_LOOP,
+                IssueState.PR_OPEN,
+            }:
+                triage = self.llm.triage(issue, context)
+                ledger.add(triage.usage)
+                record.transition(IssueState.TRIAGED)
+                record.conversation["triage"] = {
+                    "ready": triage.ready,
+                    "questions": triage.questions,
+                    "reason": triage.reason,
+                    "at": utc_now(),
+                }
+                self.store.upsert(record)
+                self._pause_if_budget_hit(issue, record, ledger, "triage")
+                if not triage.ready:
+                    if resumed and previous_blocked_on == "clarification":
+                        resume.mark_clarification_still_needed(
+                            record, triage.questions, triage.reason
+                        )
+                        self.store.upsert(record)
+                        return finish_process(
+                            self.store,
+                            record,
+                            ledger,
+                            "still needs clarification after reply",
+                            None,
+                            started,
+                        )
+                    return self._ask_and_wait(issue, record, ledger, triage.questions, started)
+                record.transition(IssueState.SPEC_READY)
+                self.store.upsert(record)
+
             pr_url = self._implement_review_and_pr(issue, record, ledger, repo_dir)
         except resume.PausedForHuman as exc:
             return finish_process(self.store, record, ledger, str(exc), None, started)
         except Exception as exc:
-            message = redact_secret_like_values(str(exc))
-            record.transition(IssueState.ABANDONED)
-            record.blocked_on = message
-            finish_process(self.store, record, ledger, message, None, started)
+            message = abandon_process(self.store, record, ledger, exc, started)
             raise RuntimeError(message) from exc
         return finish_process(
             self.store, record, ledger, "opened draft pull request", pr_url, started

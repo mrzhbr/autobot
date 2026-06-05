@@ -145,6 +145,14 @@ class CloneFailGitHost(FakeGitHost):
         raise RuntimeError("clone should not run")
 
 
+class SecretCloneFailGitHost(FakeGitHost):
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def clone(self, repo: str, target_dir: Path) -> None:
+        raise RuntimeError(f"clone failed with {self.token}")
+
+
 class SecretDiffGitHost(FakeGitHost):
     def __init__(self, token: str) -> None:
         self.token = token
@@ -786,6 +794,35 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertIsNotNone(loaded.cost["finished_at"])
             self.assertIn("wall_seconds", loaded.cost)
+
+    def test_clone_failure_abandons_before_triage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            token = "ghp_" + ("A" * 36)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            llm = SequencedLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=SecretCloneFailGitHost(token),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            with self.assertRaises(RuntimeError) as raised:
+                processor.process("owner/repo", 1)
+
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.ABANDONED)
+            self.assertEqual(llm.triage_calls, 0)
+            self.assertNotIn(token, str(raised.exception))
+            self.assertNotIn(token, loaded.blocked_on or "")
+            self.assertIn("[redacted-secret]", loaded.blocked_on or "")
 
     def test_secret_like_diff_abandons_before_review_llm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
