@@ -192,7 +192,8 @@ class HttpLLM:
             f"Review this diff with the lens: {lens}. Return strict JSON with key findings. "
             "Each finding has severity, file, line, message, blocking boolean. "
             "Blocking means the PR should not be opened until fixed.\n\n"
-            f"Issue: {issue.title}\n\n{issue.body}\n\nDiff:\n{diff[:30000]}"
+            f"Issue: {issue.title}\n\n{issue.body}\n\nComments:\n{_comments(issue)}\n\n"
+            f"Diff:\n{diff[:30000]}"
         )
         data, usage = self._json_call("review", model, prompt)
         from autobot.schemas import ReviewPayload

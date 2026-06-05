@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from autobot.config import Config
 from autobot.llm import HttpLLM, LLMError, _parse_json, _post_json, _priced
-from autobot.models import ContextFile, Issue, Usage
+from autobot.models import ContextFile, Issue, IssueComment, Usage
 
 
 class CapturingLLM(HttpLLM):
@@ -19,6 +19,8 @@ class CapturingLLM(HttpLLM):
 
     def _json_call(self, role: str, model: str, prompt: str):
         self.calls.append((role, model, prompt))
+        if role == "review":
+            return {"findings": []}, Usage(role, model, 1, 1, 0.001)
         return (
             {
                 "plan": ["Do the work."],
@@ -58,6 +60,25 @@ class LLMTests(unittest.TestCase):
         self.assertIn("Do not implement product code", prompt)
         self.assertIn("Plan before writing", prompt)
         self.assertIn("source file at or below 400 lines", prompt)
+
+    def test_review_prompt_includes_issue_comments(self) -> None:
+        llm = _llm()
+        issue = Issue(
+            "owner/repo",
+            1,
+            "Add filter",
+            "Use a filter control.",
+            "alice",
+            [],
+            [IssueComment(7, "alice", "Use a dropdown, not radio buttons.", "2026-06-05")],
+        )
+
+        llm.review("correctness", issue, "diff --git a/app.py b/app.py")
+
+        role, _, prompt = llm.calls[-1]
+        self.assertEqual(role, "review")
+        self.assertIn("Comments:\nalice: Use a dropdown, not radio buttons.", prompt)
+        self.assertIn("Diff:\ndiff --git", prompt)
 
     def test_pricing_uses_role_specific_env_vars(self) -> None:
         with patch.dict(
