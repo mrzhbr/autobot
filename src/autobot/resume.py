@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from autobot.cost import CostLedger
 from autobot.models import Issue, IssueRecord, IssueState, utc_now
+from autobot.scanner import redact_secret_like_values
 
 
 class PausedForHuman(RuntimeError):
@@ -27,7 +28,7 @@ def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bo
         {
             "id": comment.id,
             "author": comment.author,
-            "body": comment.body,
+            "body": redact_secret_like_values(comment.body),
             "created_at": comment.created_at,
         }
         for comment in issue.comments

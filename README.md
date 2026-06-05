@@ -204,6 +204,7 @@ The prototype enforces these guardrails:
 - Rejects secret-like values in configured sandbox setup commands before Docker execution.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
 - Scans issue text before triage, proposed changes before disk writes, verification commands before execution, and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.
+- Redacts token-like values from resumed human replies before adding them to the issue record.
 - Includes model-authored untracked files in review and secret-scan diffs before committing.
 - Scopes review, final secret scan, and final commit to model-authored test, implementation, and review-fix paths, avoiding sandbox setup byproducts.
 - Treats model-authored Git paths literally during scoped diff and commit operations, so Git pathspec magic cannot broaden the selected files.
