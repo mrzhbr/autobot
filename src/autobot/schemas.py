@@ -13,7 +13,7 @@ class StrictPayload(BaseModel):
 
 class TriagePayload(StrictPayload):
     ready: bool
-    questions: list[str] = Field(default_factory=list, max_length=3)
+    questions: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -25,7 +25,7 @@ class TriagePayload(StrictPayload):
     @field_validator("questions")
     @classmethod
     def strip_questions(cls, questions: list[str]) -> list[str]:
-        return [question.strip() for question in questions if question.strip()]
+        return [question.strip() for question in questions if question.strip()][:3]
 
 
 class FileChangePayload(StrictPayload):

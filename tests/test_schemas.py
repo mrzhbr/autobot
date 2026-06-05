@@ -16,10 +16,26 @@ class SchemaTests(unittest.TestCase):
 
     def test_triage_trims_questions_and_caps_count(self) -> None:
         payload = TriagePayload.model_validate(
-            {"ready": False, "questions": ["  Pick dropdown or radio?  "], "reason": "Choice."}
+            {
+                "ready": False,
+                "questions": [
+                    "  Pick dropdown or radio?  ",
+                    "How should empty results look?",
+                    "Should the choice persist?",
+                    "Which color should it be?",
+                ],
+                "reason": "Choice.",
+            }
         )
 
-        self.assertEqual(payload.questions, ["Pick dropdown or radio?"])
+        self.assertEqual(
+            payload.questions,
+            [
+                "Pick dropdown or radio?",
+                "How should empty results look?",
+                "Should the choice persist?",
+            ],
+        )
 
     def test_implementation_rejects_unsafe_paths(self) -> None:
         with self.assertRaises(ValidationError):

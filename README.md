@@ -134,7 +134,7 @@ seen -> triaged -> needs_spec -> asked -> waiting -> resumed -> spec_ready
      -> implementing -> review_loop -> pr_open
 ```
 
-If triage returns `ready: false`, the agent posts one comment with up to three questions, stores the comment id, marks the issue `agent-waiting`, and exits. On the next `run` or `watch`, comments with ids greater than the stored question comment and not authored by the bot are folded into the issue record before triage is rerun. Bot-author matching is case-insensitive.
+If triage returns `ready: false`, the agent posts one comment with up to three questions, stores the comment id, marks the issue `agent-waiting`, and exits. If the LLM returns more than three non-empty questions, validation keeps the first three instead of failing the run. On the next `run` or `watch`, comments with ids greater than the stored question comment and not authored by the bot are folded into the issue record before triage is rerun. Bot-author matching is case-insensitive.
 
 If a human reply still leaves the issue underspecified, the agent records that result,
 keeps the processed replies in the issue record, advances the resume marker past
