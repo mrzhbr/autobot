@@ -518,9 +518,11 @@ class PipelineTests(unittest.TestCase):
             with patch("autobot.sandbox.subprocess.run", return_value=completed) as run:
                 result = processor.process("owner/repo", 1)
 
-            first_docker_command = run.call_args_list[0].args[0]
+            setup_command = run.call_args_list[1].args[0]
+            commands = [call.args[0] for call in run.call_args_list]
             self.assertEqual(result.state, IssueState.PR_OPEN)
-            self.assertEqual(first_docker_command[-1], "npm ci")
+            self.assertEqual(setup_command[-1], "npm ci")
+            self.assertIn(["docker", "rm", "-f"], [command[:3] for command in commands])
 
     def test_pr_open_rerun_returns_stored_pr_url(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -196,7 +196,9 @@ The prototype enforces these guardrails:
 
 ## Sandbox
 
-Live mode uses `docker run --rm` with the checked-out repo mounted at `/work`.
+Live mode starts one detached `docker run --rm` container per issue with the
+checked-out repo mounted at `/work`, runs setup, writes, tests, lint, and type
+checks through `docker exec`, then stops the container after sandbox work completes.
 
 Useful env vars:
 

@@ -50,53 +50,100 @@ class SandboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
+            started = SimpleNamespace(returncode=0, stdout="container-1\n", stderr="")
             completed = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
 
-            with patch("autobot.sandbox.subprocess.run", return_value=completed) as run:
+            with patch("autobot.sandbox.subprocess.run", side_effect=[started, completed]) as run:
                 output = DockerSandbox(repo, "python:3.12-slim", network="none").run(
                     "python -m pytest", timeout=123
                 )
 
-        command = run.call_args.args[0]
+        start_command = run.call_args_list[0].args[0]
+        exec_command = run.call_args_list[1].args[0]
         self.assertEqual(output, "ok")
         self.assertEqual(
-            command,
+            start_command,
             [
                 "docker",
                 "run",
+                "-d",
                 "--rm",
                 "--network",
                 "none",
                 "-v",
                 f"{repo}:/work",
+                "-v",
+                f"{repo.parent}:/changes:ro",
                 "-w",
                 "/work",
                 "python:3.12-slim",
                 "sh",
                 "-lc",
+                "while true; do sleep 3600; done",
+            ],
+        )
+        self.assertEqual(
+            exec_command,
+            [
+                "docker",
+                "exec",
+                "-w",
+                "/work",
+                "container-1",
+                "sh",
+                "-lc",
                 "python -m pytest",
             ],
         )
-        self.assertEqual(run.call_args.kwargs["timeout"], 123)
-        self.assertEqual(run.call_args.kwargs["check"], False)
+        self.assertEqual(run.call_args_list[1].kwargs["timeout"], 123)
+        self.assertEqual(run.call_args_list[1].kwargs["check"], False)
 
     def test_docker_apply_changes_mounts_payload_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
+            started = SimpleNamespace(returncode=0, stdout="container-1\n", stderr="")
             completed = SimpleNamespace(returncode=0, stdout="", stderr="")
 
-            with patch("autobot.sandbox.subprocess.run", return_value=completed) as run:
+            with patch("autobot.sandbox.subprocess.run", side_effect=[started, completed]) as run:
                 DockerSandbox(repo, "python:3.12-slim").apply_changes(
                     [FileChange("README.md", "# Demo\n")]
                 )
 
             payload = json.loads((repo.parent / "changes.json").read_text(encoding="utf-8"))
 
-        command = run.call_args.args[0]
+        start_command = run.call_args_list[0].args[0]
+        exec_command = run.call_args_list[1].args[0]
         self.assertEqual(payload[0]["path"], "README.md")
-        self.assertIn(f"{repo.parent}:/changes:ro", command)
-        self.assertEqual(command[command.index("--network") + 1], "none")
+        self.assertIn(f"{repo.parent}:/changes:ro", start_command)
+        self.assertEqual(start_command[start_command.index("--network") + 1], "none")
+        self.assertEqual(exec_command[:5], ["docker", "exec", "-w", "/work", "container-1"])
+        self.assertEqual(exec_command[5:7], ["python", "-c"])
+
+    def test_docker_prepare_and_run_share_one_container(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            started = SimpleNamespace(returncode=0, stdout="container-1\n", stderr="")
+            setup = SimpleNamespace(returncode=0, stdout="setup\n", stderr="")
+            verified = SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+            sandbox = DockerSandbox(repo, "python:3.12-slim", "python -m pip install -e .")
+
+            with patch(
+                "autobot.sandbox.subprocess.run",
+                side_effect=[started, setup, verified],
+            ) as run:
+                sandbox.prepare()
+                output = sandbox.run("python -m pytest")
+
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(output, "ok")
+        self.assertEqual(
+            [command[:2] for command in commands],
+            [["docker", "run"], ["docker", "exec"], ["docker", "exec"]],
+        )
+        self.assertEqual(commands[1][4], "container-1")
+        self.assertEqual(commands[2][4], "container-1")
 
     def test_docker_apply_changes_rejects_secret_like_payload_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,10 +169,11 @@ class SandboxTests(unittest.TestCase):
             repo = Path(tmp) / "repo"
             repo.mkdir()
             token = "ghp_" + ("A" * 36)
+            started = SimpleNamespace(returncode=0, stdout="container-1\n", stderr="")
             failed = SimpleNamespace(returncode=1, stdout=f"bad {token}\n", stderr="")
 
             with (
-                patch("autobot.sandbox.subprocess.run", return_value=failed),
+                patch("autobot.sandbox.subprocess.run", side_effect=[started, failed]),
                 self.assertRaises(SandboxError) as raised,
             ):
                 DockerSandbox(repo, "python:3.12-slim").run("pytest")

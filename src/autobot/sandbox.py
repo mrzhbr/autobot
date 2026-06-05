@@ -40,10 +40,13 @@ class DockerSandbox:
         self.image = image
         self.setup_command = setup_command
         self.network = network
+        self.container_id: str | None = None
 
     def prepare(self) -> None:
         if self.setup_command:
             ensure_no_secret_commands([self.setup_command], "sandbox setup command")
+        self._ensure_started()
+        if self.setup_command:
             self.run(self.setup_command, timeout=1800)
 
     def apply_changes(self, changes: list[FileChange]) -> None:
@@ -66,36 +69,60 @@ class DockerSandbox:
             "    target.parent.mkdir(parents=True, exist_ok=True)\n"
             "    target.write_text(change.get('content') or '', encoding='utf-8')\n"
         )
-        self._docker(["python", "-c", script], mounts=[(change_file.parent, "/changes:ro")])
+        self._exec(["python", "-c", script])
 
     def run(self, command: str, timeout: int = 900) -> str:
-        return self._docker(["sh", "-lc", command], timeout=timeout)
+        return self._exec(["sh", "-lc", command], timeout=timeout)
 
-    def _docker(
-        self,
-        args: list[str],
-        timeout: int = 900,
-        mounts: list[tuple[Path, str]] | None = None,
-    ) -> str:
+    def close(self) -> None:
+        if not self.container_id:
+            return
+        subprocess.run(
+            ["docker", "rm", "-f", self.container_id],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.container_id = None
+
+    def _ensure_started(self) -> None:
+        if self.container_id:
+            return
         cmd = [
             "docker",
             "run",
+            "-d",
             "--rm",
             "--network",
             self.network,
             "-v",
             f"{self.repo_dir}:/work",
+            "-v",
+            f"{self.repo_dir.parent}:/changes:ro",
             "-w",
             "/work",
+            self.image,
+            "sh",
+            "-lc",
+            "while true; do sleep 3600; done",
         ]
-        for host, container in mounts or []:
-            cmd.extend(["-v", f"{host}:{container}"])
-        cmd.extend([self.image, *args])
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        self.container_id = _checked_output(result) or None
+        if not self.container_id:
+            raise SandboxError("docker did not return a container id")
+
+    def _exec(self, args: list[str], timeout: int = 900) -> str:
+        self._ensure_started()
+        cmd = ["docker", "exec", "-w", "/work", self.container_id or "", *args]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-        if result.returncode != 0:
-            output = redact_secret_like_values((result.stdout + "\n" + result.stderr).strip())
-            raise SandboxError(output or "sandbox command failed")
-        return result.stdout.strip()
+        return _checked_output(result)
+
+
+def _checked_output(result: subprocess.CompletedProcess) -> str:
+    if result.returncode != 0:
+        output = redact_secret_like_values((result.stdout + "\n" + result.stderr).strip())
+        raise SandboxError(output or "sandbox command failed")
+    return result.stdout.strip()
 
 
 class LocalSandbox:
