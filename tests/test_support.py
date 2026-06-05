@@ -9,7 +9,7 @@ from autobot.config import Config
 from autobot.cost import CostLedger
 from autobot.models import Usage
 from autobot.sandbox import LocalSandbox, run_verification_allow_failure
-from autobot.scanner import find_secret_like_values
+from autobot.scanner import find_secret_like_values, redact_secret_like_values
 from autobot.tests import (
     VerificationCommands,
     detect_verification_commands,
@@ -45,6 +45,14 @@ class SupportTests(unittest.TestCase):
         findings = find_secret_like_values(f"+OPENAI_API_KEY={token}\n")
 
         self.assertTrue(findings)
+
+    def test_secret_redactor_removes_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        redacted = redact_secret_like_values(f"git failed with {token}")
+
+        self.assertNotIn(token, redacted)
+        self.assertIn("[redacted-secret]", redacted)
 
     def test_detects_python_verification_commands(self) -> None:
         with TemporaryDirectory() as tmp:

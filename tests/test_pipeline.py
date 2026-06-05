@@ -92,6 +92,14 @@ class PackageLockGitHost(FakeGitHost):
         (target_dir / "package-lock.json").write_text("{}", encoding="utf-8")
 
 
+class SecretFailGitHost(FakeGitHost):
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def current_diff(self, repo_dir: Path) -> str:
+        raise RuntimeError(f"git failed with {self.token}")
+
+
 class SequencedLLM:
     def __init__(self) -> None:
         self.triage_calls = 0
@@ -410,6 +418,33 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("clear the state record", result.message)
             self.assertEqual(llm.triage_calls, 0)
             self.assertFalse(config.work_root.exists())
+
+    def test_abandoned_error_redacts_token_like_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            token = "ghp_" + ("A" * 36)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=SecretFailGitHost(token),
+                chat=IssueCommentChat(tracker),
+                llm=MockLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            with self.assertRaises(RuntimeError) as raised:
+                processor.process("owner/repo", 1)
+
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.ABANDONED)
+            self.assertNotIn(token, str(raised.exception))
+            self.assertNotIn(token, loaded.blocked_on or "")
+            self.assertIn("[redacted-secret]", loaded.blocked_on or "")
 
     def test_budget_hit_pauses_in_waiting_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

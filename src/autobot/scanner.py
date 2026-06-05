@@ -18,3 +18,10 @@ def find_secret_like_values(text: str) -> list[str]:
         for match in pattern.finditer(text):
             findings.append(match.group(0)[:120])
     return findings
+
+
+def redact_secret_like_values(text: str) -> str:
+    redacted = text
+    for pattern in SECRET_PATTERNS:
+        redacted = pattern.sub("[redacted-secret]", redacted)
+    return redacted

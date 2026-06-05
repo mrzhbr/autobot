@@ -15,7 +15,7 @@ from autobot.models import Issue, IssueRecord, IssueState, ProcessResult, utc_no
 from autobot.pr import build_pr_body
 from autobot.result import finish_process
 from autobot.review import ReviewerPanel, format_blockers
-from autobot.scanner import find_secret_like_values
+from autobot.scanner import find_secret_like_values, redact_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import detect_verification_commands, merge_verification_commands
 from autobot.workspace import branch_name, changed_files, prepare_dry_run_repo, repo_work_dir
@@ -140,10 +140,11 @@ class IssueProcessor:
         except resume.PausedForHuman as exc:
             return finish_process(self.store, record, ledger, str(exc), None, started)
         except Exception as exc:
+            message = redact_secret_like_values(str(exc))
             record.transition(IssueState.ABANDONED)
-            record.blocked_on = str(exc)
+            record.blocked_on = message
             self.store.upsert(record)
-            raise
+            raise RuntimeError(message) from exc
         return finish_process(
             self.store, record, ledger, "opened draft pull request", pr_url, started
         )

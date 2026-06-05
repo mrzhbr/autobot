@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 from autobot import cli
@@ -37,6 +37,19 @@ class FakeWatchProcessor:
 
 
 class CliTests(unittest.TestCase):
+    def test_top_level_errors_redact_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        with (
+            patch("autobot.cli._run", side_effect=RuntimeError(f"failed with {token}")),
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1", "--dry-run"])
+
+        self.assertEqual(code, 1)
+        self.assertNotIn(token, stderr.getvalue())
+        self.assertIn("[redacted-secret]", stderr.getvalue())
+
     def test_watch_once_processes_actionable_issues_sequentially(self) -> None:
         tracker = FakeWatchTracker([2, 3])
         processor = FakeWatchProcessor()

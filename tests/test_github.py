@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from autobot.github import GitHubError, GitHubGitHost, GitHubIssueTracker
@@ -148,6 +149,20 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn("--force", command)
         self.assertNotIn("--force-with-lease", command)
         self.assertEqual(command[-3:], ["push", "origin", "autobot/issue-1"])
+
+    def test_git_command_errors_redact_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        failed = SimpleNamespace(returncode=1, stdout="", stderr=f"fatal: {token}\n")
+        host = GitHubGitHost(token)
+
+        with (
+            patch("autobot.github.subprocess.run", return_value=failed),
+            self.assertRaises(GitHubError) as raised,
+        ):
+            host.push("owner/repo", Path("/tmp/repo"), "autobot/issue-1")
+
+        self.assertNotIn(token, str(raised.exception))
+        self.assertIn("[redacted-secret]", str(raised.exception))
 
     def test_reused_clone_is_reset_to_remote_default_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -13,6 +13,7 @@ from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
 from autobot.llm import build_llm
 from autobot.pipeline import IssueProcessor
+from autobot.scanner import redact_secret_like_values
 from autobot.state import StateStore
 
 
@@ -30,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             return _doctor(args)
     except Exception as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"error: {redact_secret_like_values(str(exc))}", file=sys.stderr)
         return 1
     return 2
 

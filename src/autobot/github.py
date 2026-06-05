@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from autobot.models import Issue, IssueComment
+from autobot.scanner import redact_secret_like_values
 
 DEFAULT_BRANCHES = {"main", "master", "trunk", "develop"}
 
@@ -235,6 +236,6 @@ class GitHubGitHost:
     def _run(self, cmd: list[str], cwd: Path | None = None) -> str:
         result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
         if result.returncode != 0:
-            message = (result.stderr or result.stdout).strip()
+            message = redact_secret_like_values((result.stderr or result.stdout).strip())
             raise GitHubError(message or "git command failed")
         return result.stdout.strip()
