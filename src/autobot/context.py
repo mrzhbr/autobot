@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from autobot.models import ContextFile, Issue
+from autobot.scanner import redact_secret_like_values
 
 IGNORE_DIRS = {
     ".git",
@@ -66,7 +67,9 @@ def gather_context(
 def format_context(files: list[ContextFile]) -> str:
     chunks = []
     for item in files:
-        chunks.append(f"### {item.path}\n```text\n{item.content}\n```")
+        path = redact_secret_like_values(item.path)
+        content = redact_secret_like_values(item.content)
+        chunks.append(f"### {path}\n```text\n{content}\n```")
     return "\n\n".join(chunks)
 
 

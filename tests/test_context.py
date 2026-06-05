@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from autobot.context import gather_context
-from autobot.models import Issue, IssueComment
+from autobot.context import format_context, gather_context
+from autobot.models import ContextFile, Issue, IssueComment
 
 
 class ContextTests(unittest.TestCase):
@@ -52,6 +52,14 @@ class ContextTests(unittest.TestCase):
         paths = [item.path for item in files]
         self.assertNotIn("node_modules/dropdown.py", paths)
         self.assertNotIn("dropdown.bin", paths)
+
+    def test_formatted_context_redacts_secret_like_paths_and_content(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        formatted = format_context([ContextFile(f"docs/{token}.md", f"Do not expose {token}\n")])
+
+        self.assertNotIn(token, formatted)
+        self.assertEqual(formatted.count("[redacted-secret]"), 2)
 
 
 def _issue(title: str, comments: list[IssueComment] | None = None) -> Issue:
