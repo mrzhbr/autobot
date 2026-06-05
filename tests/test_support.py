@@ -78,6 +78,21 @@ class SupportTests(unittest.TestCase):
         self.assertNotIn(value, redacted)
         self.assertEqual(redacted, "[redacted-secret]")
 
+    def test_secret_scanner_flags_unquoted_bearer_authorization(self) -> None:
+        value = "A" * 32
+
+        findings = find_secret_like_values(f"Authorization: Bearer {value}")
+
+        self.assertTrue(findings)
+
+    def test_secret_redactor_removes_unquoted_bearer_authorization(self) -> None:
+        value = "A" * 32
+
+        redacted = redact_secret_like_values(f"Authorization: Bearer {value}")
+
+        self.assertNotIn(value, redacted)
+        self.assertEqual(redacted, "[redacted-secret]")
+
     def test_secret_rejector_reports_count_without_echoing_value(self) -> None:
         token = "ghp_" + ("A" * 36)
 

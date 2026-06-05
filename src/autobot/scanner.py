@@ -8,6 +8,7 @@ SECRET_PATTERNS = [
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{36,}\b"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{40,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{32,}\b"),
+    re.compile(r"(?i)\bauthorization\s*[:=]\s*bearer\s+[A-Za-z0-9_./+=-]{20,}"),
     re.compile(
         r"(?i)(api[_-]?key|token|secret|password|credential|authorization)"
         r"\s*[:=]\s*['\"][A-Za-z0-9_./+=-]{24,}['\"]"
