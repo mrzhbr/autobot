@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from autobot.models import FileChange
-from autobot.scanner import find_secret_like_values, redact_secret_like_values
+from autobot.scanner import ensure_no_secret_like_values, redact_secret_like_values
 
 
 class SandboxError(RuntimeError):
@@ -180,15 +180,18 @@ def _verification_block(command: str, text: str) -> str:
 
 def _ensure_no_secret_changes(changes: list[FileChange]) -> None:
     text = "\n".join(f"{change.path}\n{change.content or ''}" for change in changes)
-    if secrets := find_secret_like_values(text):
-        count = len(secrets)
-        raise SandboxError(f"secret-like values found in proposed changes: {count} finding(s)")
+    _sandbox_secret_check(text, "proposed changes")
 
 
 def ensure_no_secret_commands(commands: list[str]) -> None:
-    if secrets := find_secret_like_values("\n".join(commands)):
-        count = len(secrets)
-        raise SandboxError(f"secret-like values found in verification commands: {count} finding(s)")
+    _sandbox_secret_check("\n".join(commands), "verification commands")
+
+
+def _sandbox_secret_check(text: str, surface: str) -> None:
+    try:
+        ensure_no_secret_like_values(text, surface)
+    except RuntimeError as exc:
+        raise SandboxError(str(exc)) from exc
 
 
 def _has_python_setup(repo_dir: Path) -> bool:

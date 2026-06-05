@@ -20,6 +20,12 @@ def find_secret_like_values(text: str) -> list[str]:
     return findings
 
 
+def ensure_no_secret_like_values(text: str, surface: str) -> None:
+    if secrets := find_secret_like_values(text):
+        count = len(secrets)
+        raise RuntimeError(f"secret-like values found in {surface}: {count} finding(s)")
+
+
 def redact_secret_like_values(text: str) -> str:
     redacted = text
     for pattern in SECRET_PATTERNS:

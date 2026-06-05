@@ -14,7 +14,11 @@ from autobot.sandbox import (
     run_verification,
     run_verification_allow_failure,
 )
-from autobot.scanner import find_secret_like_values, redact_secret_like_values
+from autobot.scanner import (
+    ensure_no_secret_like_values,
+    find_secret_like_values,
+    redact_secret_like_values,
+)
 from autobot.tests import (
     VerificationCommands,
     detect_verification_commands,
@@ -58,6 +62,15 @@ class SupportTests(unittest.TestCase):
 
         self.assertNotIn(token, redacted)
         self.assertIn("[redacted-secret]", redacted)
+
+    def test_secret_rejector_reports_count_without_echoing_value(self) -> None:
+        token = "ghp_" + ("A" * 36)
+
+        with self.assertRaises(RuntimeError) as raised:
+            ensure_no_secret_like_values(f"use {token}", "prompt")
+
+        self.assertIn("secret-like values found in prompt: 1 finding(s)", str(raised.exception))
+        self.assertNotIn(token, str(raised.exception))
 
     def test_detects_python_verification_commands(self) -> None:
         with TemporaryDirectory() as tmp:
