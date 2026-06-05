@@ -202,6 +202,12 @@ def _llm_pricing_check(config: Config) -> CheckResult:
         )
     missing = missing_price_vars()
     if missing:
+        if config.max_issue_dollars is not None:
+            return CheckResult(
+                "llm pricing",
+                "fail",
+                "MAX_ISSUE_DOLLARS requires LLM pricing env vars: " + ", ".join(missing),
+            )
         return CheckResult(
             "llm pricing",
             "warn",

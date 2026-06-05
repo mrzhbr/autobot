@@ -236,6 +236,23 @@ class DoctorTests(unittest.TestCase):
             self.assertIn("TRIAGE_INPUT_PRICE_PER_1K", by_name["llm pricing"].message)
             self.assertIn("REVIEW_OUTPUT_PRICE_PER_1K", by_name["llm pricing"].message)
 
+    def test_live_doctor_fails_when_dollar_budget_lacks_pricing(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "MAX_ISSUE_DOLLARS": "1.00",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["llm pricing"].status, "fail")
+            self.assertIn("MAX_ISSUE_DOLLARS requires", by_name["llm pricing"].message)
+            self.assertIn("TRIAGE_INPUT_PRICE_PER_1K", by_name["llm pricing"].message)
+
     def test_live_doctor_passes_when_llm_pricing_is_configured(self) -> None:
         env = {
             "GITHUB_TOKEN": "x",

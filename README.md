@@ -54,7 +54,7 @@ export LLM_PROVIDER=anthropic
 export MODEL=claude-sonnet-4-20250514
 ```
 
-Optional cost pricing is read from env. If unset, token usage is recorded and dollars are reported as `not configured`; live `run`, `watch`, and `doctor` fail nonnumeric pricing values before processing an issue, and `doctor` warns about missing live pricing.
+Optional cost pricing is read from env. If unset, token usage is recorded and dollars are reported as `not configured`; live `run`, `watch`, and `doctor` fail nonnumeric pricing values before processing an issue, and `doctor` warns about missing live pricing. If `MAX_ISSUE_DOLLARS` is set, live preflight requires pricing env vars so the hard dollar cap can actually be enforced.
 
 ```sh
 export TRIAGE_INPUT_PRICE_PER_1K=0.002
@@ -195,6 +195,7 @@ The prototype enforces these guardrails:
 
 - Opens draft PRs only.
 - Fails fast before live processing when required GitHub or LLM credentials are missing.
+- Fails live preflight when `MAX_ISSUE_DOLLARS` is set without LLM pricing env vars.
 - Refuses to push or open PRs from default-like branches such as `main`, `master`, and protected ref forms.
 - Does not force-push.
 - Resets reused live clones to the remote default branch and removes ignored files before creating the issue branch.
