@@ -19,6 +19,19 @@ class FakeWatchTracker:
         return self.numbers
 
 
+class SequencedWatchTracker:
+    def __init__(self, results: list[list[int] | Exception]) -> None:
+        self.results = results
+        self.calls = 0
+
+    def list_actionable(self, repo: str) -> list[int]:
+        self.calls += 1
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
 class FakeWatchProcessor:
     def __init__(self, failures: dict[int, Exception] | None = None) -> None:
         self.calls: list[tuple[str, int]] = []
@@ -316,6 +329,48 @@ class CliTests(unittest.TestCase):
             json.loads(stdout.getvalue()),
             {"repo": "owner/repo", "state": "idle", "actionable": 0},
         )
+
+    def test_watch_once_reports_list_actionable_failure_as_json(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        tracker = SequencedWatchTracker([RuntimeError(f"failed with {token}")])
+        processor = FakeWatchProcessor()
+
+        with (
+            patch("autobot.cli.GitHubIssueTracker", return_value=tracker),
+            patch("autobot.cli._processor", return_value=processor),
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            code = cli.main(["watch", "--repo", "owner/repo", "--once", "--dry-run"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual(processor.calls, [])
+        self.assertEqual(payload["state"], "error")
+        self.assertEqual(payload["phase"], "list_actionable")
+        self.assertNotIn(token, payload["message"])
+        self.assertIn("[redacted-secret]", payload["message"])
+
+    def test_continuous_watch_retries_after_list_actionable_failure(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        tracker = SequencedWatchTracker([RuntimeError(f"failed with {token}"), [2]])
+        processor = FakeWatchProcessor()
+
+        with (
+            patch("autobot.cli.GitHubIssueTracker", return_value=tracker),
+            patch("autobot.cli._processor", return_value=processor),
+            patch("autobot.cli.time.sleep", side_effect=[None, KeyboardInterrupt]),
+            redirect_stdout(io.StringIO()) as stdout,
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            cli.main(["watch", "--repo", "owner/repo", "--interval", "0", "--dry-run"])
+
+        lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual(tracker.calls, 2)
+        self.assertEqual(processor.calls, [("owner/repo", 2)])
+        self.assertEqual(lines[0]["phase"], "list_actionable")
+        self.assertEqual(lines[0]["state"], "error")
+        self.assertNotIn(token, lines[0]["message"])
+        self.assertEqual(lines[1]["state"], "pr_open")
 
 
 if __name__ == "__main__":

@@ -57,18 +57,7 @@ def _watch(args: argparse.Namespace) -> int:
     tracker = GitHubIssueTracker(config.github_token, config.agent_login)
     processor = _processor(config, tracker=tracker)
     while True:
-        failed = False
-        numbers = tracker.list_actionable(args.repo)
-        if not numbers:
-            print(json.dumps({"repo": args.repo, "state": "idle", "actionable": 0}))
-        for number in numbers:
-            try:
-                result = processor.process(args.repo, number)
-                payload = _summary(args.repo, number, result)
-            except Exception as exc:
-                failed = True
-                payload = _error_summary(args.repo, number, exc)
-            print(json.dumps(payload, sort_keys=True))
+        failed = _watch_poll(args.repo, tracker, processor)
         if args.once:
             return 1 if failed else 0
         time.sleep(args.interval)
@@ -111,10 +100,39 @@ def _summary(repo: str, issue: int, result) -> dict:
     }
 
 
+def _watch_poll(repo: str, tracker, processor: IssueProcessor) -> bool:
+    failed = False
+    try:
+        numbers = tracker.list_actionable(repo)
+    except Exception as exc:
+        print(json.dumps(_watch_error_summary(repo, "list_actionable", exc), sort_keys=True))
+        return True
+    if not numbers:
+        print(json.dumps({"repo": repo, "state": "idle", "actionable": 0}))
+    for number in numbers:
+        try:
+            result = processor.process(repo, number)
+            payload = _summary(repo, number, result)
+        except Exception as exc:
+            failed = True
+            payload = _error_summary(repo, number, exc)
+        print(json.dumps(payload, sort_keys=True))
+    return failed
+
+
 def _error_summary(repo: str, issue: int, exc: Exception) -> dict:
     return {
         "repo": repo,
         "issue": issue,
+        "state": "error",
+        "message": redact_secret_like_values(str(exc)),
+    }
+
+
+def _watch_error_summary(repo: str, phase: str, exc: Exception) -> dict:
+    return {
+        "repo": repo,
+        "phase": phase,
         "state": "error",
         "message": redact_secret_like_values(str(exc)),
     }
