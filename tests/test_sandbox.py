@@ -145,6 +145,17 @@ class SandboxTests(unittest.TestCase):
 
             self.assertFalse((root.parent / "escape.txt").exists())
 
+    def test_local_sandbox_deletes_directories_like_docker_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            docs = root / "docs"
+            docs.mkdir(parents=True)
+            (docs / "old.md").write_text("old\n", encoding="utf-8")
+
+            LocalSandbox(root).apply_changes([FileChange("docs", None, "delete")])
+
+            self.assertFalse(docs.exists())
+
     def test_local_sandbox_rejects_secret_like_payload_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repo"

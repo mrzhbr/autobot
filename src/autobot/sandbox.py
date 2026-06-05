@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -112,7 +113,9 @@ class LocalSandbox:
             target = (self.repo_dir / change.path).resolve()
             target.relative_to(self.repo_dir.resolve())
             if change.action == "delete":
-                if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.exists():
                     target.unlink()
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
