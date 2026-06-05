@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from autobot.models import utc_now
+from autobot.scanner import redact_secret_like_values
 
 SENSITIVE_KEYS = ("token", "secret", "password", "credential", "api_key", "authorization")
 
@@ -33,8 +34,11 @@ class AuditLog:
             }
         if isinstance(value, list):
             return [self._sanitize(item) for item in value]
-        if isinstance(value, str) and len(value) > 1200:
-            return value[:1200] + "...[truncated]"
+        if isinstance(value, str):
+            redacted = redact_secret_like_values(value)
+            if len(redacted) > 1200:
+                return redacted[:1200] + "...[truncated]"
+            return redacted
         return value
 
 

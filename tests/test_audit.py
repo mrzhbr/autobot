@@ -48,6 +48,18 @@ class AuditLogTests(unittest.TestCase):
         self.assertEqual(row["details"]["nested"][1]["authorization"], "[redacted]")
         self.assertEqual(row["details"]["branch"], "autobot/issue-1")
 
+    def test_redacts_token_like_string_values_without_sensitive_keys(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "audit.jsonl"
+            AuditLog(path).record("comment", "owner/repo", 1, {"body": f"failed {token}"})
+
+            text = path.read_text(encoding="utf-8")
+            row = json.loads(text)
+
+        self.assertNotIn(token, text)
+        self.assertEqual(row["details"]["body"], "failed [redacted-secret]")
+
     def test_truncates_large_string_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "audit.jsonl"

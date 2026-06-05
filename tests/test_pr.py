@@ -68,6 +68,24 @@ class PrBodyTests(unittest.TestCase):
 
         self.assertIn("- Acceptance test baseline: not recorded", body)
 
+    def test_body_redacts_token_like_values(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        record = IssueRecord("owner/repo", 1)
+        record.plan = {"plan": [f"Use {token}"]}
+        record.conversation["human_replies"] = [{"body": token}]
+
+        body = build_pr_body(
+            Issue("owner/repo", 1, "Add filter", "Body", "alice", []),
+            record,
+            CostLedger(),
+            [f"printf {token}"],
+            token,
+            {"state": token},
+        )
+
+        self.assertNotIn(token, body)
+        self.assertIn("[redacted-secret]", body)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from autobot.cost import CostLedger
 from autobot.models import Issue, IssueRecord
+from autobot.scanner import redact_secret_like_values
 
 
 def build_pr_body(
@@ -26,7 +27,7 @@ def build_pr_body(
         "\n\n<details><summary>Test output</summary>\n\n"
         f"```text\n{test_output[-8000:]}\n```\n</details>\n\n"
     )
-    return (
+    body = (
         f"Implements #{issue.number}.\n\n"
         "## Summary\n"
         + "\n".join(f"- {item}" for item in record.plan.get("plan", []))
@@ -44,6 +45,7 @@ def build_pr_body(
         f"- Review rounds: {record.review_rounds}\n"
         f"- CI status: {ci_status.get('state', 'unknown')}\n"
     )
+    return redact_secret_like_values(body)
 
 
 def _wall_seconds(started_at: str) -> str:
