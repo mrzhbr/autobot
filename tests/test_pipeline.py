@@ -487,6 +487,31 @@ class PipelineTests(unittest.TestCase):
 
             self.assertEqual(tracker.comments, [])
 
+    def test_comment_limit_resets_for_each_processed_issue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = replace(
+                Config.from_env(root=root, dry_run=False, mock_llm=True),
+                comment_limit=1,
+            )
+            tracker = FakeTracker()
+            processor = IssueProcessor(
+                config=config,
+                store=StateStore(config.db_path),
+                tracker=tracker,
+                git_host=FakeGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=AlwaysNotReadyLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            first = processor.process("owner/repo", 1)
+            second = processor.process("owner/repo", 2)
+
+            self.assertEqual(first.state, IssueState.WAITING)
+            self.assertEqual(second.state, IssueState.WAITING)
+            self.assertEqual(len(tracker.comments), 2)
+
     def test_clarification_reply_reruns_triage_once_without_second_question(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

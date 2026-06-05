@@ -43,6 +43,7 @@ class IssueProcessor:
 
     def process(self, repo: str, issue_number: int) -> ProcessResult:
         started = time.monotonic()
+        self.comments_this_run = 0
         issue = self.tracker.get(repo, issue_number)
         record = self.store.ensure(repo, issue_number)
         ledger = CostLedger(record.cost)
