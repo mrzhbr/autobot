@@ -55,6 +55,13 @@ class SupportTests(unittest.TestCase):
 
         self.assertTrue(findings)
 
+    def test_secret_scanner_flags_password_assignment(self) -> None:
+        value = "A" * 32
+
+        findings = find_secret_like_values(f'+PASSWORD="{value}"\n')
+
+        self.assertTrue(findings)
+
     def test_secret_redactor_removes_token_like_values(self) -> None:
         token = "ghp_" + ("A" * 36)
 
@@ -62,6 +69,14 @@ class SupportTests(unittest.TestCase):
 
         self.assertNotIn(token, redacted)
         self.assertIn("[redacted-secret]", redacted)
+
+    def test_secret_redactor_removes_authorization_assignment(self) -> None:
+        value = "A" * 32
+
+        redacted = redact_secret_like_values(f'AUTHORIZATION="{value}"')
+
+        self.assertNotIn(value, redacted)
+        self.assertEqual(redacted, "[redacted-secret]")
 
     def test_secret_rejector_reports_count_without_echoing_value(self) -> None:
         token = "ghp_" + ("A" * 36)
