@@ -234,8 +234,9 @@ class GitHubGitHost:
 
     def current_diff(self, repo_dir: Path, paths: list[str] | None = None) -> str:
         suffix = [] if paths is None else ["--", *paths]
-        stat = self._git(repo_dir, ["diff", "--stat", "HEAD", *suffix])
-        diff = self._git(repo_dir, ["diff", "HEAD", *suffix])
+        literal = [] if paths is None else ["--literal-pathspecs"]
+        stat = self._git(repo_dir, [*literal, "diff", "--stat", "HEAD", *suffix])
+        diff = self._git(repo_dir, [*literal, "diff", "HEAD", *suffix])
         untracked = self._untracked_diff(repo_dir, paths)
         return "\n".join(part for part in (stat, diff, untracked) if part)
 
@@ -245,7 +246,9 @@ class GitHubGitHost:
         return render_untracked_diff(repo_dir, paths)
 
     def commit_all(self, repo_dir: Path, message: str, paths: list[str] | None = None) -> bool:
-        add_args = ["add", "-A"] if paths is None else ["add", "-A", "--", *paths]
+        add_args = (
+            ["add", "-A"] if paths is None else ["--literal-pathspecs", "add", "-A", "--", *paths]
+        )
         self._git(repo_dir, add_args)
         quiet = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],

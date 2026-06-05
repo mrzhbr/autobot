@@ -339,7 +339,15 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertEqual(
             host.commands,
             [
-                ["git", "add", "-A", "--", "README.md", "tests/test_demo.py"],
+                [
+                    "git",
+                    "--literal-pathspecs",
+                    "add",
+                    "-A",
+                    "--",
+                    "README.md",
+                    "tests/test_demo.py",
+                ],
                 ["git", "commit", "-m", "feat: change"],
             ],
         )
@@ -457,6 +465,25 @@ class GitHubSafetyTests(unittest.TestCase):
 
         self.assertIn("diff --git a/tests/test_new.py b/tests/test_new.py", diff)
         self.assertNotIn("build/cache.txt", diff)
+
+    def test_current_diff_treats_requested_paths_literally(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_dir = Path(tmp)
+            host = GitHubGitHost(None)
+            host._run(["git", "init"], cwd=repo_dir)
+            host._run(["git", "config", "user.email", "autobot@example.invalid"], cwd=repo_dir)
+            host._run(["git", "config", "user.name", "Autobot"], cwd=repo_dir)
+            (repo_dir / "README.md").write_text("# Repo\n", encoding="utf-8")
+            host._run(["git", "add", "README.md"], cwd=repo_dir)
+            host._run(["git", "commit", "-m", "chore: initial"], cwd=repo_dir)
+            (repo_dir / "README.md").write_text("# Repo\n\nUnrelated.\n", encoding="utf-8")
+            (repo_dir / ":(glob)*").write_text("authored literal path\n", encoding="utf-8")
+
+            diff = host.current_diff(repo_dir, [":(glob)*"])
+
+        self.assertIn("diff --git a/:(glob)* b/:(glob)*", diff)
+        self.assertIn("+authored literal path", diff)
+        self.assertNotIn("+Unrelated.", diff)
 
     def test_open_pull_request_payload_is_always_draft(self) -> None:
         host = RecordingGitHost()
