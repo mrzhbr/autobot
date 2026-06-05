@@ -86,6 +86,8 @@ Check live-run prerequisites without posting comments, pushing branches, or open
 
 Live doctor checks Git, git author identity, Docker, GitHub credentials, LLM credentials, model names, sandbox network settings, and optional issue readability.
 
+Live `run` and `watch` also fail fast when required GitHub or LLM credentials are missing, before cloning or processing an issue. Use `doctor` for the fuller read-only preflight.
+
 Run a local dry-run against a public issue body:
 
 ```sh
@@ -142,6 +144,7 @@ Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across m
 The prototype enforces these guardrails:
 
 - Opens draft PRs only.
+- Fails fast before live processing when required GitHub or LLM credentials are missing.
 - Refuses to push default-like branches such as `main` and `master`.
 - Does not force-push.
 - Resets reused live clones to the remote default branch before creating the issue branch.

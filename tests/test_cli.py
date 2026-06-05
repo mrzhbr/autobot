@@ -51,6 +51,46 @@ class CliTests(unittest.TestCase):
         self.assertNotIn(token, stderr.getvalue())
         self.assertIn("[redacted-secret]", stderr.getvalue())
 
+    def test_live_run_fails_before_processor_without_llm_key(self) -> None:
+        with (
+            patch.dict("os.environ", {"GITHUB_TOKEN": "x"}, clear=True),
+            patch("autobot.cli._processor") as processor,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 1)
+        processor.assert_not_called()
+        self.assertIn("OPENAI_API_KEY or ANTHROPIC_API_KEY is required", stderr.getvalue())
+
+    def test_live_run_requires_provider_specific_llm_key(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"GITHUB_TOKEN": "x", "LLM_PROVIDER": "openai"},
+                clear=True,
+            ),
+            patch("autobot.cli._processor") as processor,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 1)
+        processor.assert_not_called()
+        self.assertIn("OPENAI_API_KEY is required", stderr.getvalue())
+
+    def test_live_watch_fails_before_tracker_without_llm_key(self) -> None:
+        with (
+            patch.dict("os.environ", {"GITHUB_TOKEN": "x"}, clear=True),
+            patch("autobot.cli.GitHubIssueTracker") as tracker,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["watch", "--repo", "owner/repo", "--once"])
+
+        self.assertEqual(code, 1)
+        tracker.assert_not_called()
+        self.assertIn("OPENAI_API_KEY or ANTHROPIC_API_KEY is required", stderr.getvalue())
+
     def test_watch_once_processes_actionable_issues_sequentially(self) -> None:
         tracker = FakeWatchTracker([2, 3])
         processor = FakeWatchProcessor()

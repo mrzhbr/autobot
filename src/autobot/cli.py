@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -107,7 +108,22 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
     )
     if require_github and not config.github_token and not config.dry_run:
         raise RuntimeError("GITHUB_TOKEN is required for live runs")
+    if require_github:
+        _ensure_live_llm_key(config)
     return config
+
+
+def _ensure_live_llm_key(config: Config) -> None:
+    if config.dry_run or config.mock_llm:
+        return
+    if config.llm_provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY is required")
+    if config.llm_provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
+        raise RuntimeError("ANTHROPIC_API_KEY is required")
+    if config.llm_provider not in {"openai", "anthropic"} and not (
+        os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+    ):
+        raise RuntimeError("OPENAI_API_KEY or ANTHROPIC_API_KEY is required")
 
 
 def _parser() -> argparse.ArgumentParser:
