@@ -132,6 +132,7 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
         raise RuntimeError("GITHUB_TOKEN is required for live runs")
     if require_github:
         _ensure_live_llm_key(config)
+        _ensure_live_prereqs(config)
     return config
 
 
@@ -153,6 +154,16 @@ def _ensure_live_llm_key(config: Config) -> None:
     invalid = invalid_price_vars()
     if invalid:
         raise RuntimeError("LLM pricing env vars must be numeric: " + ", ".join(invalid))
+
+
+def _ensure_live_prereqs(config: Config) -> None:
+    if config.dry_run:
+        return
+    failures = [check for check in run_doctor(config, network=False) if check.status == "fail"]
+    if not failures:
+        return
+    details = "; ".join(f"{check.name}: {check.message}" for check in failures)
+    raise RuntimeError("live prerequisite check failed: " + details)
 
 
 def _parser() -> argparse.ArgumentParser:

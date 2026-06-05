@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from autobot import cli
@@ -153,6 +154,7 @@ class CliTests(unittest.TestCase):
                 },
                 clear=True,
             ),
+            patch("autobot.cli._ensure_live_prereqs"),
             patch("autobot.cli._processor", return_value=processor) as build_processor,
             redirect_stdout(io.StringIO()) as stdout,
         ):
@@ -167,6 +169,7 @@ class CliTests(unittest.TestCase):
         processor = FakeWatchProcessor()
         with (
             patch.dict("os.environ", {"GITHUB_TOKEN": "x", "ANTHROPIC_API_KEY": "x"}, clear=True),
+            patch("autobot.cli._ensure_live_prereqs"),
             patch("autobot.cli._processor", return_value=processor) as build_processor,
             redirect_stdout(io.StringIO()) as stdout,
         ):
@@ -176,6 +179,27 @@ class CliTests(unittest.TestCase):
         self.assertIn('"state": "pr_open"', stdout.getvalue())
         config = build_processor.call_args.args[0]
         self.assertEqual(config.implement_model, "claude-sonnet-4-20250514")
+
+    def test_live_run_preflight_failure_before_processor(self) -> None:
+        with (
+            patch.dict("os.environ", {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}, clear=True),
+            patch(
+                "autobot.cli.run_doctor",
+                return_value=[
+                    SimpleNamespace(name="docker", status="fail", message="docker missing")
+                ],
+            ) as run_doctor,
+            patch("autobot.cli._processor") as processor,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 1)
+        processor.assert_not_called()
+        run_doctor.assert_called_once()
+        self.assertFalse(run_doctor.call_args.kwargs["network"])
+        self.assertIn("live prerequisite check failed", stderr.getvalue())
+        self.assertIn("docker: docker missing", stderr.getvalue())
 
     def test_live_watch_fails_before_tracker_without_llm_key(self) -> None:
         with (
@@ -209,6 +233,29 @@ class CliTests(unittest.TestCase):
         tracker.assert_not_called()
         self.assertIn("IMPLEMENT_OUTPUT_PRICE_PER_1K", stderr.getvalue())
         self.assertIn("must be numeric", stderr.getvalue())
+
+    def test_live_watch_preflight_failure_before_tracker(self) -> None:
+        with (
+            patch.dict("os.environ", {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}, clear=True),
+            patch(
+                "autobot.cli.run_doctor",
+                return_value=[
+                    SimpleNamespace(
+                        name="git identity",
+                        status="fail",
+                        message="git user.name and user.email are required",
+                    )
+                ],
+            ),
+            patch("autobot.cli.GitHubIssueTracker") as tracker,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["watch", "--repo", "owner/repo", "--once"])
+
+        self.assertEqual(code, 1)
+        tracker.assert_not_called()
+        self.assertIn("git identity", stderr.getvalue())
+        self.assertIn("user.email", stderr.getvalue())
 
     def test_watch_once_processes_actionable_issues_sequentially(self) -> None:
         tracker = FakeWatchTracker([2, 3])
