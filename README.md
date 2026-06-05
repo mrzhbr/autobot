@@ -197,7 +197,7 @@ The prototype enforces these guardrails:
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
 - Scans issue text before triage, proposed changes before disk writes, verification commands before execution, and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.
 - Includes untracked generated files in review and secret-scan diffs before committing.
-- Redacts token-like values from CLI, doctor command and issue-read output, GitHub command, GitHub HTTP/network, GitHub write payloads, LLM provider, SQLite state, abandoned-state, sandbox failure output, verification-output, PR body, audit, and issue-comment messages.
+- Redacts token-like values from CLI, doctor output, GitHub command, GitHub HTTP/network, GitHub write payloads, LLM provider, SQLite state, abandoned-state, sandbox failure output, verification-output, PR body, audit, and issue-comment messages.
 - Caps issue comments per processed issue with nonnegative `COMMENT_LIMIT_PER_RUN`.
 - Persists posted comment ids before audit and label metadata, preventing duplicate clarification comments after a local metadata failure.
 - Records comment-audit failures as state warnings without undoing posted clarification, guardrail, or budget comments.

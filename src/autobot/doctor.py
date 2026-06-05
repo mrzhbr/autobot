@@ -26,6 +26,9 @@ class CheckResult:
     status: str
     message: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "message", redact_secret_like_values(self.message))
+
     def to_dict(self) -> dict:
         return asdict(self)
 

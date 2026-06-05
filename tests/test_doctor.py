@@ -40,6 +40,15 @@ def leaking_git_command(command, capture_output, text, check, timeout):
     return passing_command(command, capture_output, text, check, timeout)
 
 
+def leaking_git_identity_command(command, capture_output, text, check, timeout):
+    token = "ghp_" + ("A" * 36)
+    if command == ["git", "config", "--get", "user.name"]:
+        return SimpleNamespace(returncode=0, stdout=f"{token}\n", stderr="")
+    if command == ["git", "config", "--get", "user.email"]:
+        return SimpleNamespace(returncode=0, stdout="bot@example.invalid\n", stderr="")
+    return passing_command(command, capture_output, text, check, timeout)
+
+
 class FakeTracker:
     def __init__(self, token: str | None, agent_login: str | None) -> None:
         self.token = token
@@ -109,6 +118,23 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["git"].status, "fail")
             self.assertNotIn(token, by_name["git"].message)
             self.assertIn("[redacted-secret]", by_name["git"].message)
+
+    def test_live_doctor_redacts_all_check_messages(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(
+                config,
+                command_runner=leaking_git_identity_command,
+                network=False,
+            )
+
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["git identity"].status, "pass")
+            self.assertNotIn(token, by_name["git identity"].message)
+            self.assertIn("[redacted-secret]", by_name["git identity"].message)
 
     def test_live_doctor_fails_when_docker_is_missing(self) -> None:
         env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
