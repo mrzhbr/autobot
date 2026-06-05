@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ class StateStore:
         return conn
 
     def _init(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 create table if not exists issue_state (
@@ -45,7 +46,7 @@ class StateStore:
             _ensure_column(conn, "issue_state", "pr_url", "text")
 
     def get(self, repo: str, issue_number: int) -> IssueRecord | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 "select * from issue_state where repo = ? and issue_number = ?",
                 (repo, issue_number),
@@ -64,7 +65,7 @@ class StateStore:
 
     def upsert(self, record: IssueRecord) -> None:
         record.updated_at = utc_now()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 insert into issue_state (
@@ -103,7 +104,7 @@ class StateStore:
             )
 
     def list_waiting(self) -> list[IssueRecord]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 "select * from issue_state where state = ? order by updated_at",
                 (IssueState.WAITING.value,),

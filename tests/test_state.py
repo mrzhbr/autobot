@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import gc
 import sqlite3
 import tempfile
 import unittest
+import warnings
+from contextlib import closing
 from pathlib import Path
 
 from autobot.models import IssueRecord, IssueState
@@ -42,7 +45,7 @@ class StateStoreTests(unittest.TestCase):
     def test_migrates_pr_url_from_legacy_conversation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "state.db"
-            with sqlite3.connect(path) as conn:
+            with closing(sqlite3.connect(path)) as conn, conn:
                 conn.execute(
                     """
                     create table issue_state (
@@ -94,7 +97,7 @@ class StateStoreTests(unittest.TestCase):
 
             store.upsert(record)
 
-            with sqlite3.connect(path) as conn:
+            with closing(sqlite3.connect(path)) as conn, conn:
                 row = conn.execute("select * from issue_state").fetchone()
             assert row is not None
             raw = "\n".join(str(value) for value in row)
@@ -109,6 +112,28 @@ class StateStoreTests(unittest.TestCase):
             self.assertNotIn(token, loaded.blocked_on or "")
             self.assertNotIn(token, repr(loaded.files_touched))
             self.assertNotIn(token, loaded.pr_url or "")
+
+    def test_store_operations_close_sqlite_connections(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.db"
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", ResourceWarning)
+                store = StateStore(path)
+                record = IssueRecord(repo="owner/repo", issue_number=7)
+                record.transition(IssueState.WAITING)
+                store.upsert(record)
+                store.get("owner/repo", 7)
+                store.list_waiting()
+                del store
+                gc.collect()
+
+            leaks = [
+                warning
+                for warning in caught
+                if warning.category is ResourceWarning
+                and "unclosed database" in str(warning.message)
+            ]
+            self.assertEqual(leaks, [])
 
 
 if __name__ == "__main__":
