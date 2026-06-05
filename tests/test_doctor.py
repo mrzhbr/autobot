@@ -27,6 +27,12 @@ def missing_docker_command(command, capture_output, text, check, timeout):
     return passing_command(command, capture_output, text, check, timeout)
 
 
+def missing_docker_daemon_command(command, capture_output, text, check, timeout):
+    if command[:2] == ["docker", "info"]:
+        return SimpleNamespace(returncode=1, stdout="", stderr="Cannot connect to Docker daemon")
+    return passing_command(command, capture_output, text, check, timeout)
+
+
 class FakeTracker:
     def __init__(self, token: str | None, agent_login: str | None) -> None:
         self.token = token
@@ -95,6 +101,23 @@ class DoctorTests(unittest.TestCase):
             self.assertFalse(doctor_ok(checks))
             self.assertEqual(by_name["docker"].status, "fail")
             self.assertIn("docker missing", by_name["docker"].message)
+
+    def test_live_doctor_fails_when_docker_daemon_is_unavailable(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(
+                config,
+                command_runner=missing_docker_daemon_command,
+                network=False,
+            )
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["docker"].status, "fail")
+            self.assertIn("daemon unavailable", by_name["docker"].message)
+            self.assertIn("Cannot connect", by_name["docker"].message)
 
     def test_live_doctor_rejects_unknown_llm_provider(self) -> None:
         env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x", "LLM_PROVIDER": "bogus"}

@@ -99,9 +99,9 @@ Check live-run prerequisites without posting comments, pushing branches, or open
 ./cli doctor --repo owner/name --issue 123
 ```
 
-Live doctor checks Git, git author identity, Docker, GitHub credentials, LLM credentials, model names, LLM pricing env vars, sandbox image/network/setup settings, and optional issue readability.
+Live doctor checks Git, git author identity, Docker CLI and daemon access, GitHub credentials, LLM credentials, model names, LLM pricing env vars, sandbox image/network/setup settings, and optional issue readability.
 
-Live `run` and `watch` also run a read-only preflight before cloning or processing an issue. They fail fast when required GitHub or LLM credentials are missing, provider-specific model keys are missing, configured LLM pricing values are malformed, Git author identity is missing, Docker is unavailable, or sandbox setup configuration is unsafe. Use `doctor` for the same checks plus optional issue readability.
+Live `run` and `watch` also run a read-only preflight before cloning or processing an issue. They fail fast when required GitHub or LLM credentials are missing, provider-specific model keys are missing, configured LLM pricing values are malformed, Git author identity is missing, Docker CLI or daemon access is unavailable, or sandbox setup configuration is unsafe. Use `doctor` for the same checks plus optional issue readability.
 
 Run a local dry-run against a public issue body:
 

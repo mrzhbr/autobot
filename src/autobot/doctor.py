@@ -104,7 +104,17 @@ def _git_config(key: str, command_runner: Callable) -> str | None:
 def _docker_check(config: Config, command_runner: Callable) -> CheckResult:
     if config.dry_run:
         return CheckResult("docker", "skip", "dry-run does not start Docker")
-    return _command_check("docker", ["docker", "--version"], command_runner)
+    cli = _command_check("docker", ["docker", "--version"], command_runner)
+    if cli.status == "fail":
+        return cli
+    daemon = _command_check(
+        "docker",
+        ["docker", "info", "--format", "{{.ServerVersion}}"],
+        command_runner,
+    )
+    if daemon.status == "fail":
+        return CheckResult("docker", "fail", "docker daemon unavailable: " + daemon.message)
+    return CheckResult("docker", "pass", f"{cli.message}; daemon {daemon.message}")
 
 
 def _github_token_check(config: Config) -> CheckResult:
