@@ -134,6 +134,11 @@ class SecretFailGitHost(FakeGitHost):
         raise RuntimeError(f"git failed with {self.token}")
 
 
+class CloneFailGitHost(FakeGitHost):
+    def clone(self, repo: str, target_dir: Path) -> None:
+        raise RuntimeError("clone should not run")
+
+
 class SecretDiffGitHost(FakeGitHost):
     def __init__(self, token: str) -> None:
         self.token = token
@@ -490,6 +495,34 @@ class PipelineTests(unittest.TestCase):
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
             self.assertEqual(loaded.pr_url, "dry-run://draft-pr")
+
+    def test_pr_open_rerun_does_not_clone_before_returning_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=False, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            record = store.ensure("owner/repo", 1)
+            record.transition(IssueState.PR_OPEN)
+            record.pr_url = "https://github.test/pull/1"
+            store.upsert(record)
+            llm = SequencedLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=CloneFailGitHost(),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(result.pr_url, "https://github.test/pull/1")
+            self.assertEqual(result.message, "draft pull request already open")
+            self.assertEqual(llm.triage_calls, 0)
 
     def test_pr_open_label_failure_does_not_abandon_opened_pr(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

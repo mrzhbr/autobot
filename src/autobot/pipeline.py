@@ -74,6 +74,11 @@ class IssueProcessor:
                 return finish_process(self.store, record, ledger, waiting_message, None, started)
             self.store.upsert(record)
 
+        if record.state == IssueState.PR_OPEN:
+            return finish_process(
+                self.store, record, ledger, "draft pull request already open", None, started
+            )
+
         topics = detect_out_of_scope(issue)
         if resumed and topics and previous_blocked_on == "out_of_scope":
             record.blocked_on = "out_of_scope"
@@ -128,11 +133,6 @@ class IssueProcessor:
                 return self._ask_and_wait(issue, record, ledger, triage.questions, started)
             record.transition(IssueState.SPEC_READY)
             self.store.upsert(record)
-
-        if record.state == IssueState.PR_OPEN:
-            return finish_process(
-                self.store, record, ledger, "draft pull request already open", None, started
-            )
 
         try:
             pr_url = self._implement_review_and_pr(issue, record, ledger, repo_dir)

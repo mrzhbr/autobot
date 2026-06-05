@@ -124,6 +124,8 @@ If an issue title or body appears to require authentication, cryptography, secre
 
 If implementation or PR creation fails unexpectedly, the issue is marked `abandoned`; reruns return the stored blocked reason until the state record is cleared for an intentional retry.
 
+If a draft PR is already recorded in state, reruns return the stored PR URL before cloning the repository again.
+
 ## Adapters
 
 Implemented defaults:
