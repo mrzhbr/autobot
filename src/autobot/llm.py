@@ -206,7 +206,7 @@ class HttpLLM:
             "Each finding has severity, file, line, message, blocking boolean. "
             "Blocking means the PR should not be opened until fixed.\n\n"
             f"{_issue_prompt(issue)}\n\nComments:\n{_comments(issue)}\n\n"
-            f"Diff:\n{diff[:30000]}"
+            f"Diff:\n{redact_secret_like_values(diff[:30000])}"
         )
         data, usage = self._json_call("review", model, prompt)
         from autobot.schemas import ReviewPayload

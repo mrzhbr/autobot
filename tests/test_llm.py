@@ -148,6 +148,16 @@ class LLMTests(unittest.TestCase):
         self.assertNotIn(token, prompt)
         self.assertGreaterEqual(prompt.count("[redacted-secret]"), 3)
 
+    def test_review_prompt_redacts_secret_like_diff_text(self) -> None:
+        llm = _llm()
+        token = "ghp_" + ("A" * 36)
+
+        llm.review("security", _issue(), f"diff --git a/.env b/.env\n+TOKEN={token}\n")
+
+        _, _, prompt = llm.calls[-1]
+        self.assertNotIn(token, prompt)
+        self.assertIn("+TOKEN=[redacted-secret]", prompt)
+
     def test_http_llm_infers_anthropic_provider_from_only_anthropic_key(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmp,
