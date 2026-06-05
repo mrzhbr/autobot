@@ -121,6 +121,16 @@ class AlwaysNotReadyLLM(SequencedLLM):
         return TriageDecision(False, ["Still unclear."], "The answer did not resolve the spec.")
 
 
+class CommentAwareLLM(SequencedLLM):
+    def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
+        self.triage_calls += 1
+        if any(
+            comment.author == "alice" and "compact" in comment.body for comment in issue.comments
+        ):
+            return TriageDecision(True, [], "Human answered.")
+        return TriageDecision(False, ["Which behavior should be used?"], "Missing choice.")
+
+
 class BlockingFixLLM(SequencedLLM):
     def __init__(self) -> None:
         super().__init__()
@@ -206,6 +216,46 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(loaded.plan["acceptance_test_baseline"]["ok"], True)
             self.assertIn("dry-run skipped", loaded.plan["acceptance_test_baseline"]["output"])
             self.assertEqual(loaded.plan["verification_commands"], ["python -m pytest", "true"])
+
+    def test_waiting_state_survives_store_and_processor_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker()
+            store = StateStore(config.db_path)
+            first = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=CommentAwareLLM(),
+                audit=AuditLog(config.audit_path),
+            ).process("owner/repo", 1)
+            self.assertEqual(first.state, IssueState.WAITING)
+
+            tracker.comments.append(
+                IssueComment(2, "alice", "Use the compact option.", "2026-06-05T00:01:00Z")
+            )
+            restarted_store = StateStore(config.db_path)
+            restarted = IssueProcessor(
+                config=config,
+                store=restarted_store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=CommentAwareLLM(),
+                audit=AuditLog(config.audit_path),
+            ).process("owner/repo", 1)
+
+            self.assertEqual(restarted.state, IssueState.PR_OPEN)
+            loaded = restarted_store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.conversation["human_replies"][0]["id"], 2)
+            self.assertEqual(
+                loaded.conversation["asked_questions"],
+                ["Which behavior should be used?"],
+            )
 
     def test_review_fix_commands_and_files_are_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
