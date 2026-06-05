@@ -147,7 +147,7 @@ The prototype enforces these guardrails:
 - Resets reused live clones to the remote default branch before creating the issue branch.
 - Runs implementation writes, tests, lint, and type checks through the Docker sandbox in live mode.
 - Asks the LLM to author acceptance-test changes before implementation, records their baseline result, then runs authored, implementation-requested, and detected repo verification commands.
-- Scans issue text before triage and final diffs before commit/PR creation for common secret-like values, including raw provider tokens.
+- Scans issue text before triage and generated diffs before review, commit, and PR creation for common secret-like values, including raw provider tokens.
 - Redacts token-like values from CLI, GitHub command, GitHub HTTP, LLM provider, doctor issue-read, abandoned-state, verification-output, PR body, audit, and issue-comment messages.
 - Caps issue comments per processed issue with `COMMENT_LIMIT_PER_RUN`.
 - Labels issues `agent-waiting`, `agent-working`, and `agent-pr-open` as state changes occur.

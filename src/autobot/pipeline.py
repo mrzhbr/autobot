@@ -298,6 +298,7 @@ class IssueProcessor:
         for round_number in range(1, self.config.max_review_rounds + 1):
             record.review_rounds = round_number
             diff = self.git_host.current_diff(repo_dir)
+            _ensure_no_secret_diff(diff)
             outcome = panel.review(issue, diff, ledger)
             self._pause_if_budget_hit(issue, record, ledger, "review")
             self.store.upsert(record)
@@ -322,9 +323,7 @@ class IssueProcessor:
             self.store.upsert(record)
             test_output = sandbox_ops.run_verification(sandbox, verification_commands, dry_run)
         diff = self.git_host.current_diff(repo_dir)
-        secrets = find_secret_like_values(diff)
-        if secrets:
-            raise RuntimeError(f"secret-like values found in diff: {secrets[:3]}")
+        _ensure_no_secret_diff(diff)
         if dry_run:
             record.files_touched = [change.path for change in all_changes]
             record.conversation["ci_status"] = {"state": "dry-run"}
@@ -389,3 +388,8 @@ class IssueProcessor:
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
         raise resume.PausedForHuman(text)
+
+
+def _ensure_no_secret_diff(diff: str) -> None:
+    if secrets := find_secret_like_values(diff):
+        raise RuntimeError(f"secret-like values found in diff: {len(secrets)} finding(s)")

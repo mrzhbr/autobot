@@ -100,6 +100,14 @@ class SecretFailGitHost(FakeGitHost):
         raise RuntimeError(f"git failed with {self.token}")
 
 
+class SecretDiffGitHost(FakeGitHost):
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def current_diff(self, repo_dir: Path) -> str:
+        return f"diff --git a/.env b/.env\n+GITHUB_TOKEN={self.token}\n"
+
+
 class SequencedLLM:
     def __init__(self) -> None:
         self.triage_calls = 0
@@ -174,6 +182,22 @@ class CostedReadyLLM(SequencedLLM):
     ) -> ImplementationPlan:
         plan = super().implement(issue, context, review_findings)
         return replace(plan, usage=Usage("implement", "test", 7, 4, 0.03))
+
+
+class ReviewCountingLLM(CostedReadyLLM):
+    def __init__(self) -> None:
+        super().__init__()
+        self.review_calls = 0
+
+    def review(
+        self,
+        lens: str,
+        issue: Issue,
+        diff: str,
+        model: str | None = None,
+    ) -> ReviewReport:
+        self.review_calls += 1
+        return super().review(lens, issue, diff, model)
 
 
 class AlwaysNotReadyLLM(SequencedLLM):
@@ -472,6 +496,35 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertIsNotNone(loaded.cost["finished_at"])
             self.assertIn("wall_seconds", loaded.cost)
+
+    def test_secret_like_diff_abandons_before_review_llm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            token = "ghp_" + ("A" * 36)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            llm = ReviewCountingLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=SecretDiffGitHost(token),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            with self.assertRaises(RuntimeError) as raised:
+                processor.process("owner/repo", 1)
+
+            self.assertEqual(llm.review_calls, 0)
+            self.assertNotIn(token, str(raised.exception))
+            self.assertIn("secret-like values found in diff: 1 finding(s)", str(raised.exception))
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertEqual(loaded.state, IssueState.ABANDONED)
+            self.assertNotIn(token, loaded.blocked_on or "")
 
     def test_budget_hit_pauses_in_waiting_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
