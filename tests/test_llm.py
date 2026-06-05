@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from autobot.config import Config
-from autobot.llm import HttpLLM, LLMError, _parse_json, _post_json, _priced
+from autobot.llm import HttpLLM, LLMError, MockLLM, _parse_json, _post_json, _priced
 from autobot.models import ContextFile, Issue, IssueComment, Usage
 
 
@@ -46,6 +46,21 @@ class RoutingLLM(HttpLLM):
 
 
 class LLMTests(unittest.TestCase):
+    def test_mock_llm_reports_usage_for_each_phase(self) -> None:
+        llm = MockLLM()
+        issue = _issue()
+        context = [ContextFile("README.md", "# Demo\n")]
+
+        triage = llm.triage(issue, context)
+        test_plan = llm.write_tests(issue, context)
+        plan = llm.implement(issue, context)
+        review = llm.review("correctness", issue, "diff --git a/app.py b/app.py")
+
+        self.assertEqual(triage.usage, Usage("triage", "mock-triage", 0, 0, 0))
+        self.assertEqual(test_plan.usage, Usage("test", "mock-test", 0, 0, 0))
+        self.assertEqual(plan.usage, Usage("implement", "mock-implement", 0, 0, 0))
+        self.assertEqual(review.usage, Usage("review", "mock-review", 0, 0, 0))
+
     def test_implement_prompt_encodes_engineering_discipline(self) -> None:
         llm = _llm()
 

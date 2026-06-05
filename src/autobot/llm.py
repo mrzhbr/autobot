@@ -46,6 +46,9 @@ COMMENT_TEXT_LIMIT = 2000
 
 
 class MockLLM:
+    def _usage(self, role: str) -> Usage:
+        return Usage(role, f"mock-{role}", 0, 0, 0)
+
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
         body = f"{issue.title}\n{issue.body}".lower()
         if "clarify" in body or "unspecified" in body or "?" in body:
@@ -53,11 +56,13 @@ class MockLLM:
                 ready=False,
                 questions=["What exact behavior should the implementation use?"],
                 reason="The issue explicitly signals an unresolved choice.",
+                usage=self._usage("triage"),
             )
         return TriageDecision(
             ready=True,
             questions=[],
             reason="Mock triage marks this issue ready.",
+            usage=self._usage("triage"),
         )
 
     def implement(
@@ -73,6 +78,7 @@ class MockLLM:
             plan=["Append a visible issue marker to README.md for the prototype dry run."],
             changes=[FileChange(path="README.md", content=content)],
             test_commands=["python -m unittest discover -s tests || true"],
+            usage=self._usage("implement"),
         )
 
     def write_tests(self, issue: Issue, context: list[ContextFile]) -> ImplementationPlan:
@@ -86,6 +92,7 @@ class MockLLM:
             plan=["Add a smoke acceptance test for the issue marker."],
             changes=[FileChange(path=f"tests/test_issue_{issue.number}.py", content=content)],
             test_commands=["python -m pytest"],
+            usage=self._usage("test"),
         )
 
     def review(
