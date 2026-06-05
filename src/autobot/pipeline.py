@@ -6,7 +6,7 @@ from pathlib import Path
 from autobot import resume
 from autobot import sandbox as sandbox_ops
 from autobot.adapters import LLM, ChatChannel, GitHost, IssueTracker
-from autobot.audit import AuditLog
+from autobot.audit import AuditLog, record_best_effort
 from autobot.config import Config
 from autobot.context import gather_context
 from autobot.cost import CostLedger
@@ -190,7 +190,9 @@ class IssueProcessor:
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
         if not self.config.dry_run:
-            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
+            record_best_effort(
+                self.audit, "comment", issue.repo, issue.number, {"comment_id": comment_id}, record
+            )
             set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
             self.store.upsert(record)
         return finish_process(
@@ -224,7 +226,9 @@ class IssueProcessor:
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
         if not self.config.dry_run:
-            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
+            record_best_effort(
+                self.audit, "comment", issue.repo, issue.number, {"comment_id": comment_id}, record
+            )
             set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
             self.store.upsert(record)
         return finish_process(
@@ -376,7 +380,9 @@ class IssueProcessor:
         record.transition(IssueState.WAITING)
         self.store.upsert(record)
         if not self.config.dry_run:
-            self.audit.record("comment", issue.repo, issue.number, {"comment_id": comment_id})
+            record_best_effort(
+                self.audit, "comment", issue.repo, issue.number, {"comment_id": comment_id}, record
+            )
             set_issue_label(self.tracker, self.audit, record, issue, "agent-waiting")
             self.store.upsert(record)
         raise resume.PausedForHuman(text)

@@ -696,7 +696,7 @@ class PipelineTests(unittest.TestCase):
                 any(row["action"] == "label_failed" for row in audit_rows),
             )
 
-    def test_comment_audit_failure_does_not_duplicate_clarification(self) -> None:
+    def test_comment_audit_failure_keeps_clarification_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = Config.from_env(root=root, dry_run=False, mock_llm=True)
@@ -712,16 +712,17 @@ class PipelineTests(unittest.TestCase):
                 audit=CommentAuditFail(),
             )
 
-            with self.assertRaisesRegex(RuntimeError, "audit write failed"):
-                processor.process("owner/repo", 1)
+            first = processor.process("owner/repo", 1)
             second = processor.process("owner/repo", 1)
 
+            self.assertEqual(first.state, IssueState.WAITING)
             self.assertEqual(second.state, IssueState.WAITING)
             self.assertEqual(len(tracker.comments), 1)
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
             self.assertEqual(loaded.state, IssueState.WAITING)
             self.assertEqual(loaded.conversation["asked_comment_id"], 1)
+            self.assertEqual(loaded.conversation["audit_warnings"][0]["action"], "comment")
 
     def test_abandoned_rerun_does_not_restart_work(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
