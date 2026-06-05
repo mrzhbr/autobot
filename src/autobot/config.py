@@ -59,7 +59,7 @@ class Config:
             sandbox_network=os.getenv("SANDBOX_NETWORK", "none"),
             sandbox_setup_command=os.getenv("SANDBOX_SETUP_COMMAND"),
             default_test_command=os.getenv("AUTO_TEST_COMMAND"),
-            max_review_rounds=int(os.getenv("MAX_REVIEW_ROUNDS", "3")),
+            max_review_rounds=_bounded_int("MAX_REVIEW_ROUNDS", "3", minimum=1, maximum=3),
             max_issue_tokens=_optional_int(os.getenv("MAX_ISSUE_TOKENS")),
             max_issue_dollars=_optional_float(os.getenv("MAX_ISSUE_DOLLARS")),
             comment_limit=int(os.getenv("COMMENT_LIMIT_PER_RUN", "2")),
@@ -74,6 +74,13 @@ def _optional_int(value: str | None) -> int | None:
 
 def _optional_float(value: str | None) -> float | None:
     return float(value) if value else None
+
+
+def _bounded_int(name: str, default: str, minimum: int, maximum: int) -> int:
+    value = int(os.getenv(name, default))
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
 
 
 def _model_list(value: str | None, fallback: str) -> list[str]:

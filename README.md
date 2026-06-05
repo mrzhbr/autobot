@@ -160,6 +160,10 @@ Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.
 
 Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model. If unset, all reviewers use `REVIEW_MODEL`.
 
+`MAX_REVIEW_ROUNDS` defaults to `3` and must stay between `1` and `3`, preserving
+the prototype stopping rule that a draft PR cannot open without review and that
+the review loop stops after at most three rounds.
+
 ## Safety
 
 The prototype enforces these guardrails:

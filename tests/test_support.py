@@ -200,6 +200,22 @@ class SupportTests(unittest.TestCase):
 
         self.assertEqual(config.sandbox_network, "none")
 
+    def test_config_rejects_zero_review_rounds(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"MAX_REVIEW_ROUNDS": "0"}, clear=True),
+            self.assertRaisesRegex(ValueError, "MAX_REVIEW_ROUNDS must be between 1 and 3"),
+        ):
+            Config.from_env(Path(tmp))
+
+    def test_config_rejects_more_than_three_review_rounds(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"MAX_REVIEW_ROUNDS": "4"}, clear=True),
+            self.assertRaisesRegex(ValueError, "MAX_REVIEW_ROUNDS must be between 1 and 3"),
+        ):
+            Config.from_env(Path(tmp))
+
 
 if __name__ == "__main__":
     unittest.main()
