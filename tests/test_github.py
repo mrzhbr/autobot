@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from autobot.github import GitHubError, GitHubGitHost
+from autobot.github import GitHubError, GitHubGitHost, GitHubIssueTracker
 
 
 class RecordingGitHost(GitHubGitHost):
@@ -30,6 +30,43 @@ class RecordingTracker:
     def _request(self, method: str, path: str, body: dict | None = None):
         self.requests.append((method, path, body))
         return {"html_url": "https://github.test/pull/1"}
+
+
+class PagedIssueTracker(GitHubIssueTracker):
+    def __init__(self) -> None:
+        super().__init__("token", "bot")
+        self.requests: list[tuple[str, str]] = []
+
+    def _request(self, method: str, path: str, body: dict | None = None):
+        self.requests.append((method, path))
+        if path == "/repos/owner/repo/issues/7":
+            return {
+                "number": 7,
+                "title": "Clarified feature",
+                "body": "Please implement this.",
+                "user": {"login": "alice"},
+                "labels": [{"name": "agent-ready"}],
+            }
+        if path == "/repos/owner/repo/issues/7/comments?per_page=100&page=1":
+            return [
+                {
+                    "id": index,
+                    "body": f"comment {index}",
+                    "created_at": "2026-06-05T00:00:00Z",
+                    "user": {"login": "alice"},
+                }
+                for index in range(1, 101)
+            ]
+        if path == "/repos/owner/repo/issues/7/comments?per_page=100&page=2":
+            return [
+                {
+                    "id": 101,
+                    "body": "Use the compact option.",
+                    "created_at": "2026-06-05T00:01:00Z",
+                    "user": {"login": "alice"},
+                }
+            ]
+        raise AssertionError(path)
 
 
 class GitHubSafetyTests(unittest.TestCase):
@@ -71,6 +108,18 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertEqual(body["head"], "autobot/issue-1")
         self.assertEqual(body["base"], "main")
         self.assertEqual(body["draft"], True)
+
+    def test_issue_get_paginates_comments(self) -> None:
+        tracker = PagedIssueTracker()
+
+        issue = tracker.get("owner/repo", 7)
+
+        self.assertEqual(len(issue.comments), 101)
+        self.assertEqual(issue.comments[-1].body, "Use the compact option.")
+        self.assertIn(
+            ("GET", "/repos/owner/repo/issues/7/comments?per_page=100&page=2"),
+            tracker.requests,
+        )
 
 
 if __name__ == "__main__":

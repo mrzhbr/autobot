@@ -129,6 +129,8 @@ Implemented defaults:
 - issue comments for `ChatChannel`
 - OpenAI or Anthropic HTTP calls for `LLM`
 
+Issue reads fetch paginated comments, so clarification replies after the first 100 comments are still available to the resume loop.
+
 Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.py`.
 
 Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model. If unset, all reviewers use `REVIEW_MODEL`.

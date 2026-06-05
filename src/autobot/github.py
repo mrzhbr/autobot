@@ -37,10 +37,7 @@ class GitHubIssueTracker:
 
     def get(self, repo: str, issue_number: int) -> Issue:
         issue = self._request("GET", f"/repos/{repo}/issues/{issue_number}")
-        comments = self._request(
-            "GET",
-            f"/repos/{repo}/issues/{issue_number}/comments?per_page=100",
-        )
+        comments = self._request_pages(f"/repos/{repo}/issues/{issue_number}/comments")
         return Issue(
             repo=repo,
             number=int(issue["number"]),
@@ -58,6 +55,18 @@ class GitHubIssueTracker:
                 for comment in comments
             ],
         )
+
+    def _request_pages(self, path: str) -> list[Any]:
+        items: list[Any] = []
+        page = 1
+        while True:
+            data = self._request("GET", f"{path}?per_page=100&page={page}")
+            if not isinstance(data, list):
+                raise GitHubError(f"GitHub pagination expected a list for {path}")
+            items.extend(data)
+            if len(data) < 100:
+                return items
+            page += 1
 
     def comment(self, repo: str, issue_number: int, text: str) -> int:
         data = self._request(
