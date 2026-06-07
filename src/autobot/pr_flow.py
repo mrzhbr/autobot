@@ -10,6 +10,7 @@ from autobot.models import Issue, IssueRecord, IssueState, utc_now
 from autobot.pr import build_pr_body
 from autobot.scanner import redact_secret_like_values
 from autobot.state import StateStore
+from autobot.workflow_models import WorkflowConversation
 from autobot.workspace import branch_name, changed_files
 
 
@@ -35,14 +36,18 @@ def finalize_draft_pr(
     git_host.push(issue.repo, repo_dir, branch)
     record_best_effort(audit, "push", issue.repo, issue.number, {"branch": branch}, record)
     ci_status = git_host.ci_status(issue.repo, branch)
-    record.conversation["ci_status"] = ci_status
+    conversation = WorkflowConversation.from_record(record)
+    conversation.ci_status = ci_status
+    conversation.save(record)
     pr_url = git_host.open_draft_pr(
         issue.repo,
         branch,
         f"Draft: {issue.title}",
         build_pr_body(issue, record, ledger, verification_commands, test_output, ci_status),
     )
-    record.conversation["pr_url"] = pr_url
+    conversation = WorkflowConversation.from_record(record)
+    conversation.record_pr_open(pr_url, ci_status)
+    conversation.save(record)
     record.pr_url = pr_url
     store.upsert(record)
     record_best_effort(

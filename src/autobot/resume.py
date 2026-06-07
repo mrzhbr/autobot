@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from autobot.cost import CostLedger
-from autobot.models import Issue, IssueRecord, IssueState, utc_now
+from autobot.models import Issue, IssueRecord, IssueState
 from autobot.scanner import redact_secret_like_values
+from autobot.workflow_models import HumanReply, WorkflowConversation
 
 
 class PausedForHuman(RuntimeError):
@@ -10,12 +11,7 @@ class PausedForHuman(RuntimeError):
 
 
 def resume_after_comment_id(record: IssueRecord) -> int:
-    ids = [int(record.conversation.get("resume_after_comment_id") or 0)]
-    ids.append(int(record.conversation.get("asked_comment_id") or 0))
-    for key in ("guardrail_pause", "budget_pause"):
-        pause = record.conversation.get(key) or {}
-        ids.append(int(pause.get("comment_id") or 0))
-    return max(ids)
+    return WorkflowConversation.from_record(record).resume_marker()
 
 
 def latest_comment_id(issue: Issue) -> int:
@@ -25,18 +21,20 @@ def latest_comment_id(issue: Issue) -> int:
 def resume_if_answered(record: IssueRecord, issue: Issue, bot: str | None) -> bool:
     resume_after = resume_after_comment_id(record)
     new_replies = [
-        {
-            "id": comment.id,
-            "author": comment.author,
-            "body": redact_secret_like_values(comment.body),
-            "created_at": comment.created_at,
-        }
+        HumanReply(
+            id=comment.id,
+            author=comment.author,
+            body=redact_secret_like_values(comment.body),
+            created_at=comment.created_at,
+        )
         for comment in issue.comments
         if comment.id > resume_after and not _same_login(comment.author, bot)
     ]
     if not new_replies:
         return False
-    record.conversation["human_replies"] = _append_human_replies(record, new_replies)
+    conversation = WorkflowConversation.from_record(record)
+    conversation.record_human_replies(new_replies)
+    conversation.save(record)
     record.transition(IssueState.RESUMED)
     record.blocked_on = None
     return True
@@ -67,7 +65,9 @@ def resume_if_budget_allows(
 ) -> bool:
     if record.blocked_on != "budget" or ledger.hit_budget(max_tokens, max_dollars):
         return False
-    record.conversation["budget_resumed_at"] = utc_now()
+    conversation = WorkflowConversation.from_record(record)
+    conversation.record_budget_resumed()
+    conversation.save(record)
     record.transition(IssueState.RESUMED)
     record.blocked_on = None
     return True
@@ -78,34 +78,11 @@ def mark_clarification_still_needed(
     questions: list[str],
     reason: str,
 ) -> None:
-    record.conversation["clarification_after_resume"] = {
-        "questions": questions,
-        "reason": reason,
-        "at": utc_now(),
-    }
-    replies = record.conversation.get("human_replies") or []
-    reply_ids = [int(reply.get("id") or 0) for reply in replies if isinstance(reply, dict)]
-    if reply_ids:
-        record.conversation["resume_after_comment_id"] = max(reply_ids)
+    conversation = WorkflowConversation.from_record(record)
+    conversation.record_clarification_still_needed(questions, reason)
+    conversation.save(record)
     record.blocked_on = "clarification"
     record.transition(IssueState.WAITING)
-
-
-def _append_human_replies(
-    record: IssueRecord,
-    new_replies: list[dict],
-) -> list[dict]:
-    replies = [
-        reply for reply in record.conversation.get("human_replies", []) if isinstance(reply, dict)
-    ]
-    seen_ids = {int(reply.get("id") or 0) for reply in replies}
-    for reply in new_replies:
-        reply_id = int(reply.get("id") or 0)
-        if reply_id in seen_ids:
-            continue
-        replies.append(reply)
-        seen_ids.add(reply_id)
-    return replies
 
 
 def _same_login(author: str, bot: str | None) -> bool:

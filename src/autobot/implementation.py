@@ -18,6 +18,7 @@ from autobot.scanner import ensure_no_secret_like_values
 from autobot.state import StateStore
 from autobot.tests import VerificationCommands, detect_verification_commands
 from autobot.tests import merge_verification_commands as merge_commands
+from autobot.workflow_models import WorkflowConversation
 
 BudgetPause = Callable[[Issue, IssueRecord, CostLedger, str], None]
 
@@ -168,9 +169,9 @@ class ImplementationRunner:
                 self._scan_final_diff(repo_dir, _unique_paths(artifacts.all_changes)),
                 ledger,
             )
-            record.conversation.setdefault("review_reports", []).append(
-                review_round_artifact(round_number, outcome)
-            )
+            conversation = WorkflowConversation.from_record(record)
+            conversation.record_review_round(review_round_artifact(round_number, outcome))
+            conversation.save(record)
             self.store.upsert(record)
             self.pause_if_budget_hit(issue, record, ledger, "review")
             if not outcome.blocking_findings:
@@ -221,8 +222,9 @@ class ImplementationRunner:
         all_changes: list[FileChange],
     ) -> str:
         record.files_touched = _unique_paths(all_changes)
-        record.conversation["ci_status"] = {"state": "dry-run"}
-        record.conversation["pr_url"] = "dry-run://draft-pr"
+        conversation = WorkflowConversation.from_record(record)
+        conversation.record_pr_open("dry-run://draft-pr", {"state": "dry-run"})
+        conversation.save(record)
         record.pr_url = "dry-run://draft-pr"
         record.transition(IssueState.PR_OPEN)
         record.cost = ledger.to_dict()

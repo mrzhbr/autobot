@@ -9,6 +9,7 @@ The implementation is intentionally thin but end-to-end:
 - SQLite stores durable per-issue state, including PR URLs, in `.autobot/state.db`.
 - Outward actions are appended to `.autobot/audit.jsonl`.
 - Pydantic validates structured LLM output before the pipeline acts on it.
+- The issue lifecycle runs through an explicit typed step workflow with scoped mypy coverage.
 - Live runs use GitHub Issues, GitHub PRs, Docker, and an OpenAI or Anthropic-compatible LLM path.
 - `--dry-run --mock-llm` exercises the state machine without comments, pushes, PRs, Docker, or LLM calls.
 

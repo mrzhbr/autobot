@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "mypy>=1.10",
   "pytest>=8.0",
   "ruff>=0.6",
 ]
@@ -25,6 +26,31 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = [
+  "src/autobot/workflow.py",
+  "src/autobot/workflow_models.py",
+  "src/autobot/workflow_pauses.py",
+]
+
+[[tool.mypy.overrides]]
+module = [
+  "autobot.adapters",
+  "autobot.config",
+  "autobot.cost",
+  "autobot.guardrails",
+  "autobot.implementation",
+  "autobot.models",
+  "autobot.pr",
+  "autobot.resume",
+  "autobot.review",
+  "autobot.sandbox",
+  "autobot.tests",
+]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
