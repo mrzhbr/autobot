@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from autobot import cli
-from autobot.models import IssueState, ProcessResult
+from autobot.models import IssueRecord, IssueState, ProcessResult
+from autobot.state import StateStore
 
 
 class FakeWatchTracker:
@@ -413,6 +416,55 @@ class CliTests(unittest.TestCase):
         self.assertEqual(lines[0]["state"], "error")
         self.assertNotIn(token, lines[0]["message"])
         self.assertEqual(lines[1]["state"], "pr_open")
+
+    def test_state_clear_deletes_one_issue_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state.db"
+            store = StateStore(db)
+            store.upsert(IssueRecord(repo="owner/repo", issue_number=7))
+
+            with redirect_stdout(io.StringIO()) as stdout:
+                code = cli.main(
+                    [
+                        "state",
+                        "clear",
+                        "--repo",
+                        "owner/repo",
+                        "--issue",
+                        "7",
+                        "--db",
+                        str(db),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["state"], "cleared")
+            self.assertTrue(payload["deleted"])
+            self.assertIsNone(store.get("owner/repo", 7))
+
+    def test_state_clear_reports_missing_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state.db"
+
+            with redirect_stdout(io.StringIO()) as stdout:
+                code = cli.main(
+                    [
+                        "state",
+                        "clear",
+                        "--repo",
+                        "owner/repo",
+                        "--issue",
+                        "7",
+                        "--db",
+                        str(db),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["state"], "not_found")
+            self.assertFalse(payload["deleted"])
 
 
 if __name__ == "__main__":

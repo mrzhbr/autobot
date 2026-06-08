@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
             return _watch(args)
         if args.command == "doctor":
             return _doctor(args)
+        if args.command == "state":
+            return _state(args)
     except Exception as exc:
         print(f"error: {redact_secret_like_values(str(exc))}", file=sys.stderr)
         return 1
@@ -73,6 +75,25 @@ def _doctor(args: argparse.Namespace) -> int:
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if payload["ok"] else 1
+
+
+def _state(args: argparse.Namespace) -> int:
+    if args.state_command == "clear":
+        return _state_clear(args)
+    raise RuntimeError("state subcommand is required")
+
+
+def _state_clear(args: argparse.Namespace) -> int:
+    config = _config(args, require_github=False)
+    deleted = StateStore(config.db_path).delete(args.repo, int(args.issue))
+    payload = {
+        "repo": args.repo,
+        "issue": int(args.issue),
+        "state": "cleared" if deleted else "not_found",
+        "deleted": deleted,
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
 
 
 def _processor(config: Config, tracker: GitHubIssueTracker | None = None) -> IssueProcessor:
@@ -210,6 +231,13 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--issue", type=int, help="GitHub issue number")
     doctor.add_argument("--no-network", action="store_true", help="Skip GitHub issue readability")
     _common(doctor)
+
+    state = subcommands.add_parser("state", help="Inspect or modify local issue state")
+    state_subcommands = state.add_subparsers(dest="state_command")
+    clear = state_subcommands.add_parser("clear", help="Delete one local issue state record")
+    clear.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
+    clear.add_argument("--issue", required=True, type=int, help="GitHub issue number")
+    _common(clear)
     return parser
 
 

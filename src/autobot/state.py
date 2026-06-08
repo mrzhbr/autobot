@@ -63,6 +63,14 @@ class StateStore:
         self.upsert(record)
         return record
 
+    def delete(self, repo: str, issue_number: int) -> bool:
+        with closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                "delete from issue_state where repo = ? and issue_number = ?",
+                (repo, issue_number),
+            )
+        return cursor.rowcount > 0
+
     def upsert(self, record: IssueRecord) -> None:
         record.updated_at = utc_now()
         with closing(self._connect()) as conn, conn:

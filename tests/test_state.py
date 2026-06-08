@@ -113,6 +113,26 @@ class StateStoreTests(unittest.TestCase):
             self.assertNotIn(token, repr(loaded.files_touched))
             self.assertNotIn(token, loaded.pr_url or "")
 
+    def test_delete_removes_one_issue_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.db")
+            store.upsert(IssueRecord(repo="owner/repo", issue_number=7))
+            store.upsert(IssueRecord(repo="owner/repo", issue_number=8))
+
+            deleted = store.delete("owner/repo", 7)
+
+            self.assertTrue(deleted)
+            self.assertIsNone(store.get("owner/repo", 7))
+            self.assertIsNotNone(store.get("owner/repo", 8))
+
+    def test_delete_reports_missing_issue_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.db")
+
+            deleted = store.delete("owner/repo", 7)
+
+            self.assertFalse(deleted)
+
     def test_store_operations_close_sqlite_connections(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "state.db"

@@ -180,8 +180,7 @@ def _last_link_page(link: str) -> int | None:
 
 
 def _page_path(path: str, page: int) -> str:
-    separator = "&" if "?" in path else "?"
-    return f"{path}{separator}per_page=100&page={page}"
+    return f"{path}{'&' if '?' in path else '?'}per_page=100&page={page}"
 
 
 def _dedupe_by_id(items: list[Any]) -> list[Any]:
