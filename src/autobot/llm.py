@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import urllib.error
 import urllib.request
 from typing import Any
 
@@ -16,6 +15,7 @@ from autobot.config import (
     provider_for_model,
 )
 from autobot.context import format_context
+from autobot.llm_http import LLMHTTPError, post_json, read_http_json
 from autobot.models import (
     ContextFile,
     FileChange,
@@ -292,25 +292,17 @@ def build_llm(config: Config):
 
 
 def _post_json(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
-    request = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Content-Type", "application/json")
-    return _read_http_json(request, "OpenAI")
+    try:
+        return post_json(url, token, body)
+    except LLMHTTPError as exc:
+        raise LLMError(str(exc)) from exc
 
 
 def _read_http_json(request: urllib.request.Request, provider: str, data: bytes | None = None):
     try:
-        with urllib.request.urlopen(request, data=data, timeout=90) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except TimeoutError as exc:
-        raise LLMError(f"{provider} request timed out while reading response") from exc
-    except urllib.error.HTTPError as exc:
-        payload = exc.read().decode("utf-8", errors="replace")
-        message = redact_secret_like_values(f"{provider} request failed: {exc.code} {payload}")
-        raise LLMError(message) from exc
-    except urllib.error.URLError as exc:
-        message = redact_secret_like_values(f"{provider} request failed: {exc}")
-        raise LLMError(message) from exc
+        return read_http_json(request, provider, data)
+    except LLMHTTPError as exc:
+        raise LLMError(str(exc)) from exc
 
 
 def _parse_json(text: str) -> dict[str, Any]:

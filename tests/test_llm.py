@@ -45,6 +45,20 @@ class RoutingLLM(HttpLLM):
         return {"findings": []}, Usage(role, model, 1, 1, 0.001)
 
 
+class FakeHTTPResponse:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+
+    def __enter__(self) -> FakeHTTPResponse:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.payload
+
+
 class LLMTests(unittest.TestCase):
     def test_mock_llm_reports_usage_for_each_phase(self) -> None:
         llm = MockLLM()
@@ -320,7 +334,7 @@ class LLMTests(unittest.TestCase):
         )
 
         with (
-            patch("autobot.llm.urllib.request.urlopen", side_effect=error),
+            patch("autobot.llm_http.urllib.request.urlopen", side_effect=error),
             self.assertRaises(LLMError) as raised,
         ):
             _post_json("https://api.openai.com/v1/chat/completions", token, {"model": "m"})
@@ -330,12 +344,33 @@ class LLMTests(unittest.TestCase):
 
     def test_http_timeouts_include_provider_context(self) -> None:
         with (
-            patch("autobot.llm.urllib.request.urlopen", side_effect=TimeoutError),
+            patch.dict("os.environ", {"LLM_HTTP_RETRIES": "0"}, clear=True),
+            patch("autobot.llm_http.urllib.request.urlopen", side_effect=TimeoutError),
             self.assertRaises(LLMError) as raised,
         ):
             _post_json("https://api.openai.com/v1/chat/completions", "token", {"model": "m"})
 
-        self.assertEqual(str(raised.exception), "OpenAI request timed out while reading response")
+        self.assertEqual(
+            str(raised.exception),
+            "OpenAI request timed out after 1 attempts while reading response",
+        )
+
+    def test_http_timeout_retries_before_success(self) -> None:
+        response = FakeHTTPResponse(b'{"ok": true}')
+
+        with (
+            patch.dict("os.environ", {"LLM_HTTP_RETRIES": "1"}, clear=True),
+            patch(
+                "autobot.llm_http.urllib.request.urlopen",
+                side_effect=[TimeoutError, response],
+            ) as urlopen,
+            patch("autobot.llm_http.time.sleep") as sleep,
+        ):
+            payload = _post_json("https://api.openai.com/v1/chat/completions", "token", {})
+
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(1)
 
 
 def _llm() -> CapturingLLM:
