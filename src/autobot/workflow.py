@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import assert_never
@@ -79,6 +80,7 @@ class IssueWorkflow(WorkflowPauses):
         chat: ChatChannel,
         llm: LLM,
         audit: AuditLog,
+        progress: Callable[[WorkflowStep], None] | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -87,6 +89,7 @@ class IssueWorkflow(WorkflowPauses):
         self.chat = chat
         self.llm = llm
         self.audit = audit
+        self.progress = progress
         self.comments_this_run = 0
 
     def process(self, repo: str, issue_number: int) -> ProcessResult:
@@ -95,6 +98,8 @@ class IssueWorkflow(WorkflowPauses):
         step = WorkflowStep.LOAD_RECORD
         while True:
             try:
+                if self.progress is not None:
+                    self.progress(step)
                 result = validate_step_result(self._run_step(step, ctx))
             except resume.PausedForHuman as exc:
                 return self._finish_wait(ctx, str(exc))

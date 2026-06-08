@@ -5,6 +5,7 @@ import json
 import subprocess
 import urllib.parse
 import urllib.request
+from itertools import count
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +82,7 @@ class GitHubIssueTracker:
 
     def _request_all_list_pages(self, path: str) -> list[Any]:
         items: list[Any] = []
-        for page in self._page_numbers():
+        for page in count(1):
             data = self._request("GET", _page_path(path, page))
             if not isinstance(data, list):
                 raise GitHubError(f"GitHub pagination expected a list for {path}")
@@ -92,7 +93,7 @@ class GitHubIssueTracker:
 
     def _request_all_search_items(self, path: str) -> list[Any]:
         items: list[Any] = []
-        for page in self._page_numbers():
+        for page in count(1):
             data = self._request("GET", _page_path(path, page))
             page_items = data.get("items", []) if isinstance(data, dict) else None
             if not isinstance(page_items, list):
@@ -101,12 +102,6 @@ class GitHubIssueTracker:
             if self._last_page_reached(page, len(page_items)):
                 break
         return _dedupe_by_id(items)
-
-    def _page_numbers(self):
-        page = 1
-        while True:
-            yield page
-            page += 1
 
     def _last_page_reached(self, page: int, count: int) -> bool:
         last_page = _last_link_page(self._last_response_headers.get("Link", ""))
@@ -157,6 +152,8 @@ class GitHubIssueTracker:
             with urllib.request.urlopen(request, timeout=30) as response:
                 self._last_response_headers = dict(response.headers.items())
                 return json.loads(response.read().decode("utf-8"))
+        except TimeoutError as exc:
+            raise GitHubError(f"GitHub {method} {path} timed out while reading response") from exc
         except urllib.error.HTTPError as exc:
             payload = exc.read().decode("utf-8", errors="replace")
             message = redact_secret_like_values(

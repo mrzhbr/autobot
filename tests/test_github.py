@@ -409,6 +409,21 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_timeouts_are_wrapped_with_request_context(self) -> None:
+        tracker = GitHubIssueTracker("token", "bot")
+
+        with (
+            patch("autobot.github.urllib.request.urlopen", side_effect=TimeoutError),
+            self.assertRaises(GitHubError) as raised,
+        ):
+            tracker.get("owner/repo", 1)
+
+        self.assertIsNone(raised.exception.status_code)
+        self.assertIn(
+            "GitHub GET /repos/owner/repo/issues/1 timed out while reading response",
+            str(raised.exception),
+        )
+
     def test_comment_payload_redacts_token_like_values(self) -> None:
         token = "ghp_" + ("A" * 36)
         tracker = CommentRecordingTracker()

@@ -302,6 +302,8 @@ def _read_http_json(request: urllib.request.Request, provider: str, data: bytes 
     try:
         with urllib.request.urlopen(request, data=data, timeout=90) as response:
             return json.loads(response.read().decode("utf-8"))
+    except TimeoutError as exc:
+        raise LLMError(f"{provider} request timed out while reading response") from exc
     except urllib.error.HTTPError as exc:
         payload = exc.read().decode("utf-8", errors="replace")
         message = redact_secret_like_values(f"{provider} request failed: {exc.code} {payload}")

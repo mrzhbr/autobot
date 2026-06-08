@@ -328,6 +328,15 @@ class LLMTests(unittest.TestCase):
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("[redacted-secret]", str(raised.exception))
 
+    def test_http_timeouts_include_provider_context(self) -> None:
+        with (
+            patch("autobot.llm.urllib.request.urlopen", side_effect=TimeoutError),
+            self.assertRaises(LLMError) as raised,
+        ):
+            _post_json("https://api.openai.com/v1/chat/completions", "token", {"model": "m"})
+
+        self.assertEqual(str(raised.exception), "OpenAI request timed out while reading response")
+
 
 def _llm() -> CapturingLLM:
     root = Path(tempfile.mkdtemp())

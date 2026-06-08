@@ -201,6 +201,29 @@ class CliTests(unittest.TestCase):
         self.assertIn('"state": "pr_open"', stdout.getvalue())
         config = build_processor.call_args.args[0]
         self.assertEqual(config.review_models, ["gpt-4.1", "claude-sonnet-4-20250514"])
+        self.assertIs(build_processor.call_args.kwargs["progress"], cli._print_run_progress)
+
+    def test_run_quiet_suppresses_progress_callback(self) -> None:
+        processor = FakeWatchProcessor()
+        with (
+            patch.dict("os.environ", {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}, clear=True),
+            patch("autobot.cli._ensure_live_prereqs"),
+            patch("autobot.cli._processor", return_value=processor) as build_processor,
+            redirect_stdout(io.StringIO()),
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1", "--quiet"])
+
+        self.assertEqual(code, 0)
+        self.assertIsNone(build_processor.call_args.kwargs["progress"])
+
+    def test_run_progress_prints_json_line_to_stderr(self) -> None:
+        with redirect_stderr(io.StringIO()) as stderr:
+            cli._print_run_progress(cli.WorkflowStep.TRIAGE)
+
+        payload = json.loads(stderr.getvalue())
+        self.assertEqual(payload["state"], "progress")
+        self.assertEqual(payload["step"], "triage")
+        self.assertEqual(payload["message"], "running triage LLM")
 
     def test_live_run_accepts_anthropic_key_without_openai_key(self) -> None:
         processor = FakeWatchProcessor()

@@ -24,6 +24,7 @@ from autobot.llm import build_llm
 from autobot.pipeline import IssueProcessor
 from autobot.scanner import redact_secret_like_values
 from autobot.state import StateStore
+from autobot.workflow_models import WorkflowStep
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,7 +50,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     config = _config(args)
-    processor = _processor(config)
+    progress = None if args.quiet else _print_run_progress
+    processor = _processor(config, progress=progress)
     result = processor.process(args.repo, int(args.issue))
     print(json.dumps(_summary(args.repo, int(args.issue), result), indent=2, sort_keys=True))
     return 0
@@ -96,14 +98,41 @@ def _state_clear(args: argparse.Namespace) -> int:
     return 0
 
 
-def _processor(config: Config, tracker: GitHubIssueTracker | None = None) -> IssueProcessor:
+def _processor(
+    config: Config,
+    tracker: GitHubIssueTracker | None = None,
+    progress=None,
+) -> IssueProcessor:
     store = StateStore(config.db_path)
     tracker = tracker or GitHubIssueTracker(config.github_token, config.agent_login)
     git_host = GitHubGitHost(config.github_token)
     chat = IssueCommentChat(tracker)
     llm = build_llm(config)
     audit = AuditLog(config.audit_path)
-    return IssueProcessor(config, store, tracker, git_host, chat, llm, audit)
+    return IssueProcessor(config, store, tracker, git_host, chat, llm, audit, progress=progress)
+
+
+def _print_run_progress(step: WorkflowStep) -> None:
+    payload = {
+        "state": "progress",
+        "step": step.value,
+        "message": _RUN_PROGRESS_MESSAGES[step],
+    }
+    print(json.dumps(payload, sort_keys=True), file=sys.stderr, flush=True)
+
+
+_RUN_PROGRESS_MESSAGES = {
+    WorkflowStep.LOAD_RECORD: "loading local state",
+    WorkflowStep.TERMINAL_CHECK: "checking terminal state",
+    WorkflowStep.BUDGET_GATE: "checking budget",
+    WorkflowStep.READ_ISSUE: "reading GitHub issue",
+    WorkflowStep.RESUME_WAITING: "checking waiting resume",
+    WorkflowStep.GUARDRAIL: "checking guardrails",
+    WorkflowStep.PREPARE_WORKSPACE: "preparing workspace",
+    WorkflowStep.TRIAGE: "running triage LLM",
+    WorkflowStep.IMPLEMENT_REVIEW_FINALIZE: "implementing, reviewing, and opening draft PR",
+    WorkflowStep.FINISH: "finishing result",
+}
 
 
 def _summary(repo: str, issue: int, result) -> dict:
@@ -218,6 +247,7 @@ def _parser() -> argparse.ArgumentParser:
     run = subcommands.add_parser("run", help="Process one GitHub issue")
     run.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
     run.add_argument("--issue", required=True, type=int, help="GitHub issue number")
+    run.add_argument("--quiet", action="store_true", help="Suppress progress output")
     _common(run)
 
     watch = subcommands.add_parser("watch", help="Poll for assigned or @-mentioned issues")
