@@ -292,6 +292,18 @@ class GitHubSafetyTests(unittest.TestCase):
         self.assertNotIn("--force-with-lease", command)
         self.assertEqual(command[-3:], ["push", "origin", "autobot/issue-1"])
 
+    def test_git_auth_uses_basic_token_extraheader(self) -> None:
+        host = GitHubGitHost("token")
+
+        config = host._auth_config()
+
+        self.assertEqual(config[0], "-c")
+        self.assertTrue(
+            config[1].startswith("http.https://github.com/.extraheader=AUTHORIZATION: basic ")
+        )
+        self.assertNotIn("bearer", config[1].lower())
+        self.assertNotIn("token", config[1])
+
     def test_git_command_errors_redact_token_like_values(self) -> None:
         token = "ghp_" + ("A" * 36)
         failed = SimpleNamespace(returncode=1, stdout="", stderr=f"fatal: {token}\n")
@@ -422,7 +434,10 @@ class GitHubSafetyTests(unittest.TestCase):
                 [
                     "git",
                     "-c",
-                    "http.https://github.com/.extraheader=AUTHORIZATION: bearer token",
+                    (
+                        "http.https://github.com/.extraheader=AUTHORIZATION: basic "
+                        "eC1hY2Nlc3MtdG9rZW46dG9rZW4="
+                    ),
                     "fetch",
                     "origin",
                     "--prune",

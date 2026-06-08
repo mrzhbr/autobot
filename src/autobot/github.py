@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 import urllib.parse
@@ -348,7 +349,8 @@ class GitHubGitHost:
     def _auth_config(self) -> list[str]:
         if not self.token:
             return []
-        return ["-c", f"http.https://github.com/.extraheader=AUTHORIZATION: bearer {self.token}"]
+        credentials = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
+        return ["-c", f"http.https://github.com/.extraheader=AUTHORIZATION: basic {credentials}"]
 
     def _git(self, repo_dir: Path, args: list[str]) -> str:
         return self._run(["git", *args], cwd=repo_dir)
