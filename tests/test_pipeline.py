@@ -12,6 +12,7 @@ from autobot.audit import AuditLog
 from autobot.chat import IssueCommentChat
 from autobot.config import Config
 from autobot.github import GitHubGitHost
+from autobot.implementation import _drop_failed_commands
 from autobot.llm import MockLLM
 from autobot.models import (
     ContextFile,
@@ -26,6 +27,7 @@ from autobot.models import (
     Usage,
 )
 from autobot.pipeline import IssueProcessor
+from autobot.sandbox import SandboxError
 from autobot.state import StateStore
 
 
@@ -367,6 +369,39 @@ class DuplicateFileFixLLM(BlockingFixLLM):
         return super().implement(issue, context, review_findings)
 
 
+class VerificationFixLLM(SequencedLLM):
+    def __init__(self) -> None:
+        super().__init__()
+        self.verification_findings: list[str] = []
+
+    def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
+        return TriageDecision(True, [], "Ready.")
+
+    def implement(
+        self,
+        issue: Issue,
+        context: list[ContextFile],
+        review_findings: list[str] | None = None,
+    ) -> ImplementationPlan:
+        if review_findings:
+            self.verification_findings.extend(review_findings)
+            return ImplementationPlan(
+                plan=["Fix the failed verification command."],
+                changes=[
+                    FileChange(
+                        f"tests/test_issue_{issue.number}.py",
+                        "def test_acceptance():\n    assert True\n",
+                    )
+                ],
+                test_commands=["python -m pytest -q"],
+            )
+        return ImplementationPlan(
+            plan=["Write initial behavior."],
+            changes=[FileChange("README.md", "# Dry run repo\n\nImplemented.\n")],
+            test_commands=["true"],
+        )
+
+
 class NoTestCommandLLM(SequencedLLM):
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
         return TriageDecision(True, [], "Ready.")
@@ -385,6 +420,12 @@ class NoTestCommandLLM(SequencedLLM):
 
 
 class PipelineTests(unittest.TestCase):
+    def test_failed_verification_command_is_removed_before_retry(self) -> None:
+        commands = ["pytest -q", 'python -c "bad"']
+        error = SandboxError('$ python -c "bad"\nSyntaxError: bad command')
+
+        self.assertEqual(_drop_failed_commands(commands, error), ["pytest -q"])
+
     def test_waiting_state_resumes_after_human_reply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -471,6 +512,37 @@ class PipelineTests(unittest.TestCase):
                 "$ python -m unittest discover -s tests",
                 loaded.plan["acceptance_test_baseline"]["output"],
             )
+
+    def test_dry_run_planner_artifact_is_recorded_in_plan(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"PLANNER_ENABLED": "1"}, clear=True),
+        ):
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=CostedReadyLLM(),
+                audit=AuditLog(config.audit_path),
+            )
+
+            result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            loaded = store.get("owner/repo", 1)
+            assert loaded is not None
+            self.assertIn("planner", loaded.plan)
+            self.assertEqual(
+                loaded.plan["planner"]["summary"],
+                "Planner disabled for legacy dry-run harness.",
+            )
+            self.assertEqual(loaded.plan["planner"]["target_files"], ["README.md"])
 
     def test_waiting_state_survives_store_and_processor_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -650,6 +722,50 @@ class PipelineTests(unittest.TestCase):
             loaded = store.get("owner/repo", 1)
             assert loaded is not None
             self.assertEqual(loaded.files_touched, ["tests/test_issue_1.py", "README.md"])
+
+    def test_verification_failure_is_sent_back_to_implementer_before_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = Config.from_env(root=root, dry_run=True, mock_llm=True)
+            tracker = FakeTracker(body="Ready to implement.")
+            store = StateStore(config.db_path)
+            llm = VerificationFixLLM()
+            processor = IssueProcessor(
+                config=config,
+                store=store,
+                tracker=tracker,
+                git_host=GitHubGitHost(None),
+                chat=IssueCommentChat(tracker),
+                llm=llm,
+                audit=AuditLog(config.audit_path),
+            )
+
+            with patch(
+                "autobot.sandbox.run_verification",
+                side_effect=[
+                    SandboxError(
+                        "Would reformat: tests/test_issue_1.py\n1 file would be reformatted"
+                    ),
+                    "ok",
+                ],
+            ):
+                result = processor.process("owner/repo", 1)
+
+            self.assertEqual(result.state, IssueState.PR_OPEN)
+            self.assertEqual(result.review_rounds, 1)
+            self.assertEqual(result.files_touched, ["tests/test_issue_1.py", "README.md"])
+            self.assertEqual(len(llm.verification_findings), 1)
+            self.assertIn("Verification failed", llm.verification_findings[0])
+            self.assertIn("Would reformat", llm.verification_findings[0])
+            self.assertEqual(
+                result.verification_commands,
+                [
+                    "python -m pytest",
+                    "true",
+                    "python -m pytest -q",
+                    "python -m unittest discover -s tests",
+                ],
+            )
 
     def test_live_pipeline_uses_detected_sandbox_setup_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

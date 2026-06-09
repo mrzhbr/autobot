@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+from typing import Any, Protocol, cast
 
 from autobot.config import (
+    LLM_KEY_ENV,
     Config,
     configured_llm_models,
     infer_llm_provider,
@@ -16,8 +17,31 @@ from autobot.config import (
     model_providers,
 )
 from autobot.github import GitHubIssueTracker
+from autobot.models import Issue
 from autobot.sandbox import SandboxError, ensure_no_secret_commands
 from autobot.scanner import redact_secret_like_values
+
+
+class CommandRunner(Protocol):
+    def __call__(
+        self,
+        command: list[str],
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: int,
+    ) -> Any:
+        """Run a command and return an object with returncode/stdout/stderr."""
+
+
+class IssueReader(Protocol):
+    def get(self, repo: str, issue: int) -> Issue:
+        """Read one issue."""
+
+
+class IssueTrackerFactory(Protocol):
+    def __call__(self, token: str | None, agent_login: str | None) -> IssueReader:
+        """Build an issue reader."""
 
 
 @dataclass(frozen=True)
@@ -29,8 +53,8 @@ class CheckResult:
     def __post_init__(self) -> None:
         object.__setattr__(self, "message", redact_secret_like_values(self.message))
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    def to_dict(self) -> dict[str, str]:
+        return {"name": self.name, "status": self.status, "message": self.message}
 
 
 def run_doctor(
@@ -38,21 +62,26 @@ def run_doctor(
     repo: str | None = None,
     issue: int | None = None,
     network: bool = True,
-    command_runner: Callable = subprocess.run,
-    tracker_factory: Callable = GitHubIssueTracker,
+    command_runner: CommandRunner | None = None,
+    tracker_factory: IssueTrackerFactory = GitHubIssueTracker,
 ) -> list[CheckResult]:
+    runner = command_runner or cast(CommandRunner, subprocess.run)
     checks = [
-        _command_check("git", ["git", "--version"], command_runner),
-        _git_identity_check(config, command_runner),
-        _docker_check(config, command_runner),
+        _command_check("git", ["git", "--version"], runner),
+        _git_identity_check(config, runner),
+        _docker_check(config, runner),
         _github_token_check(config),
         _agent_login_check(config),
         _llm_key_check(config),
         _model_check("triage model", config.triage_model),
         _model_check("implement model", config.implement_model),
         _model_check("review model", config.review_model),
+        _planner_model_check(config),
         _llm_model_provider_check(config),
         _llm_pricing_check(config),
+        _implementation_harness_check(config, runner),
+        _planner_harness_check(config, runner),
+        _sandbox_backend_check(config),
         _sandbox_image_check(config),
         _sandbox_network_check(config),
         _sandbox_setup_check(config),
@@ -65,7 +94,7 @@ def doctor_ok(checks: list[CheckResult]) -> bool:
     return not any(check.status == "fail" for check in checks)
 
 
-def _command_check(name: str, command: list[str], command_runner: Callable) -> CheckResult:
+def _command_check(name: str, command: list[str], command_runner: CommandRunner) -> CheckResult:
     try:
         result = command_runner(command, capture_output=True, text=True, check=False, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -80,7 +109,7 @@ def _command_check(name: str, command: list[str], command_runner: Callable) -> C
     return CheckResult(name, "pass", redact_secret_like_values(first_line))
 
 
-def _git_identity_check(config: Config, command_runner: Callable) -> CheckResult:
+def _git_identity_check(config: Config, command_runner: CommandRunner) -> CheckResult:
     if config.dry_run:
         return CheckResult("git identity", "skip", "dry-run does not commit")
     if os.getenv("GIT_AUTHOR_NAME") and os.getenv("GIT_AUTHOR_EMAIL"):
@@ -92,7 +121,7 @@ def _git_identity_check(config: Config, command_runner: Callable) -> CheckResult
     return CheckResult("git identity", "fail", "configure git user.name and user.email")
 
 
-def _git_config(key: str, command_runner: Callable) -> str | None:
+def _git_config(key: str, command_runner: CommandRunner) -> str | None:
     try:
         result = command_runner(
             ["git", "config", "--get", key],
@@ -108,7 +137,7 @@ def _git_config(key: str, command_runner: Callable) -> str | None:
     return (result.stdout or "").strip() or None
 
 
-def _docker_check(config: Config, command_runner: Callable) -> CheckResult:
+def _docker_check(config: Config, command_runner: CommandRunner) -> CheckResult:
     if config.dry_run:
         return CheckResult("docker", "skip", "dry-run does not start Docker")
     cli = _command_check("docker", ["docker", "--version"], command_runner)
@@ -142,15 +171,19 @@ def _llm_key_check(config: Config) -> CheckResult:
     if config.mock_llm or config.dry_run:
         return CheckResult("llm key", "skip", "mock or dry-run mode does not need an LLM key")
     provider = infer_llm_provider(config.llm_provider)
-    if provider not in {None, "openai", "anthropic"}:
-        return CheckResult("llm key", "fail", "LLM_PROVIDER must be openai or anthropic")
-    if provider == "openai":
-        return _env_key_check("llm key", "OPENAI_API_KEY")
-    if provider == "anthropic":
-        return _env_key_check("llm key", "ANTHROPIC_API_KEY")
-    if os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
-        return CheckResult("llm key", "pass", "an OpenAI or Anthropic key is set")
-    return CheckResult("llm key", "fail", "OPENAI_API_KEY or ANTHROPIC_API_KEY is required")
+    if provider not in {None, *LLM_KEY_ENV}:
+        return CheckResult(
+            "llm key", "fail", "LLM_PROVIDER must be openai, anthropic, or openrouter"
+        )
+    if provider:
+        return _env_key_check("llm key", LLM_KEY_ENV[provider])
+    if any(os.getenv(key) for key in LLM_KEY_ENV.values()):
+        return CheckResult("llm key", "pass", "an OpenAI, Anthropic, or OpenRouter key is set")
+    return CheckResult(
+        "llm key",
+        "fail",
+        "OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY is required",
+    )
 
 
 def _env_key_check(name: str, key: str) -> CheckResult:
@@ -165,6 +198,12 @@ def _model_check(name: str, model: str) -> CheckResult:
     return CheckResult(name, "fail", f"{name} is empty")
 
 
+def _planner_model_check(config: Config) -> CheckResult:
+    if not config.planner_enabled:
+        return CheckResult("planner model", "skip", "planner disabled")
+    return _model_check("planner model", config.planner_model)
+
+
 def _llm_model_provider_check(config: Config) -> CheckResult:
     if config.mock_llm or config.dry_run:
         return CheckResult(
@@ -173,7 +212,7 @@ def _llm_model_provider_check(config: Config) -> CheckResult:
     provider = infer_llm_provider(config.llm_provider)
     if provider is None:
         return CheckResult("llm model/provider", "skip", "LLM key missing")
-    if provider not in {"openai", "anthropic"}:
+    if provider not in LLM_KEY_ENV:
         return CheckResult("llm model/provider", "skip", "valid LLM_PROVIDER required")
     models = configured_llm_models(config)
     missing = missing_model_keys(provider, models)
@@ -191,7 +230,7 @@ def _llm_pricing_check(config: Config) -> CheckResult:
     if config.mock_llm or config.dry_run:
         return CheckResult("llm pricing", "skip", "mock or dry-run mode reports zero dollars")
     provider = infer_llm_provider(config.llm_provider)
-    if provider not in {"openai", "anthropic"}:
+    if provider not in LLM_KEY_ENV:
         return CheckResult("llm pricing", "skip", "valid LLM_PROVIDER required")
     invalid = invalid_price_vars()
     if invalid:
@@ -218,12 +257,133 @@ def _llm_pricing_check(config: Config) -> CheckResult:
     )
 
 
+def _implementation_harness_check(config: Config, command_runner: CommandRunner) -> CheckResult:
+    if config.dry_run or config.mock_llm:
+        return CheckResult(
+            "implementation harness",
+            "skip",
+            "dry-run or mock mode uses the legacy mock harness",
+        )
+    if config.implement_harness == "legacy":
+        return CheckResult("implementation harness", "pass", "legacy")
+    if config.implement_harness == "openhands":
+        return CheckResult("implementation harness", "fail", "OpenHands adapter is not wired yet")
+    if config.implement_harness != "pi":
+        return CheckResult("implementation harness", "fail", "unknown implementation harness")
+    provider = config.harness_llm_provider
+    key = LLM_KEY_ENV.get(provider or "")
+    if not key:
+        return CheckResult(
+            "implementation harness",
+            "fail",
+            "HARNESS_LLM_PROVIDER must be openai, anthropic, or openrouter",
+        )
+    if not os.getenv(key):
+        return CheckResult("implementation harness", "fail", f"{key} is required for Pi harness")
+    if config.sandbox_network == "none":
+        return CheckResult(
+            "implementation harness",
+            "fail",
+            "Pi harness runs inside Docker and requires SANDBOX_NETWORK with egress",
+        )
+    return _pi_cli_check(config, command_runner, "implementation harness", config.harness_model)
+
+
+def _planner_harness_check(config: Config, command_runner: CommandRunner) -> CheckResult:
+    if not config.planner_enabled:
+        return CheckResult("planner harness", "skip", "planner disabled")
+    if config.dry_run or config.mock_llm:
+        return CheckResult(
+            "planner harness",
+            "skip",
+            "dry-run or mock mode uses the legacy mock harness",
+        )
+    if config.planner_harness != "pi":
+        return CheckResult("planner harness", "fail", "unknown planner harness")
+    provider = config.planner_llm_provider
+    key = LLM_KEY_ENV.get(provider or "")
+    if not key:
+        return CheckResult(
+            "planner harness",
+            "fail",
+            "PLANNER_LLM_PROVIDER must be openai, anthropic, or openrouter",
+        )
+    if not os.getenv(key):
+        return CheckResult("planner harness", "fail", f"{key} is required for Pi planner")
+    if config.sandbox_network == "none":
+        return CheckResult(
+            "planner harness",
+            "fail",
+            "Pi planner runs inside Docker and requires SANDBOX_NETWORK with egress",
+        )
+    return _pi_cli_check(config, command_runner, "planner harness", config.planner_model)
+
+
+def _pi_cli_check(
+    config: Config,
+    command_runner: CommandRunner,
+    name: str,
+    model: str,
+) -> CheckResult:
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        config.sandbox_network,
+        config.sandbox_image,
+        "sh",
+        "-lc",
+        "PI_CODING_AGENT_DIR=/tmp/autobot-pi-agent PI_OFFLINE=1 pi --version",
+    ]
+    try:
+        result = command_runner(command, capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return CheckResult(name, "fail", str(exc))
+    if result.returncode != 0:
+        output = (result.stderr or result.stdout).strip()
+        return CheckResult(
+            name,
+            "fail",
+            "Pi CLI is not available in SANDBOX_IMAGE: " + output,
+        )
+    version_text = (result.stdout or result.stderr or "").strip()
+    version = version_text.splitlines()[0] if version_text else "available"
+    return CheckResult(
+        name,
+        "pass",
+        f"pi {version} using {model}",
+    )
+
+
 def _sandbox_image_check(config: Config) -> CheckResult:
     if config.dry_run:
         return CheckResult("sandbox image", "skip", "dry-run does not start Docker")
     if config.sandbox_image:
         return CheckResult("sandbox image", "pass", config.sandbox_image)
     return CheckResult("sandbox image", "fail", "SANDBOX_IMAGE must not be empty")
+
+
+def _sandbox_backend_check(config: Config) -> CheckResult:
+    if config.dry_run:
+        return CheckResult("sandbox backend", "skip", "dry-run does not start Docker")
+    if config.sandbox_backend == "docker-copy":
+        return CheckResult(
+            "sandbox backend",
+            "pass",
+            "docker-copy uses an isolated container workspace and syncs changed paths",
+        )
+    if config.sandbox_backend == "docker-bind":
+        return CheckResult(
+            "sandbox backend",
+            "warn",
+            "docker-bind exposes the host clone through a writable bind mount",
+        )
+    return CheckResult(
+        "sandbox backend",
+        "fail",
+        "SANDBOX_BACKEND must be docker-bind or docker-copy",
+    )
 
 
 def _sandbox_network_check(config: Config) -> CheckResult:
@@ -259,7 +419,7 @@ def _issue_check(
     repo: str | None,
     issue: int | None,
     network: bool,
-    tracker_factory: Callable,
+    tracker_factory: IssueTrackerFactory,
 ) -> CheckResult:
     if not repo or issue is None:
         return CheckResult("issue readable", "skip", "provide --repo and --issue to check GitHub")

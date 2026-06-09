@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 import urllib.error
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 from autobot.config import Config
 from autobot.llm import HttpLLM, LLMError, MockLLM, _parse_json, _post_json, _priced
+from autobot.llm_http import LLMHTTPError
 from autobot.models import ContextFile, Issue, IssueComment, Usage
 
 
@@ -19,6 +21,10 @@ class CapturingLLM(HttpLLM):
 
     def _json_call(self, role: str, model: str, prompt: str):
         self.calls.append((role, model, prompt))
+        if role == "triage":
+            return {"ready": True, "questions": [], "reason": "Specified."}, Usage(
+                role, model, 1, 1, 0.001
+            )
         if role == "review":
             return {"findings": []}, Usage(role, model, 1, 1, 0.001)
         return (
@@ -42,6 +48,10 @@ class RoutingLLM(HttpLLM):
 
     def _anthropic_json(self, role: str, model: str, prompt: str):
         self.providers.append(("anthropic", model))
+        return {"findings": []}, Usage(role, model, 1, 1, 0.001)
+
+    def _openrouter_json(self, role: str, model: str, prompt: str):
+        self.providers.append(("openrouter", model))
         return {"findings": []}, Usage(role, model, 1, 1, 0.001)
 
 
@@ -91,6 +101,21 @@ class LLMTests(unittest.TestCase):
         self.assertIn("source file at or below 400 lines", prompt)
         self.assertIn("include test, lint, or type commands", prompt)
         self.assertIn("[high] app.py:12 fix behavior", prompt)
+
+    def test_triage_prompt_does_not_ask_for_repo_discovery_details(self) -> None:
+        llm = _llm()
+
+        llm.triage(
+            _issue(),
+            [ContextFile("src/router.py", "from agents.offline import try_offline\n")],
+        )
+
+        role, _, prompt = llm.calls[-1]
+        self.assertEqual(role, "triage")
+        self.assertIn("product or acceptance-criteria choice", prompt)
+        self.assertIn("Do not ask where files, functions, call sites", prompt)
+        self.assertIn("discover from the repo context", prompt)
+        self.assertIn("prior Autobot clarification questions", prompt)
 
     def test_test_author_prompt_keeps_tests_spec_derived(self) -> None:
         llm = _llm()
@@ -224,11 +249,21 @@ class LLMTests(unittest.TestCase):
 
         self.assertEqual(llm.provider, "anthropic")
 
+    def test_http_llm_infers_openrouter_provider_from_only_openrouter_key(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"OPENROUTER_API_KEY": "x"}, clear=True),
+        ):
+            llm = HttpLLM(Config.from_env(Path(tmp)))
+
+        self.assertEqual(llm.provider, "openrouter")
+        self.assertEqual(llm.config.triage_model, "openai/gpt-4.1")
+
     def test_http_llm_rejects_model_when_matching_key_is_missing(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmp,
             patch.dict("os.environ", {"OPENAI_API_KEY": "x"}, clear=True),
-            patch("autobot.llm.urllib.request.urlopen") as urlopen,
+            patch("autobot.llm_http.urllib.request.urlopen") as urlopen,
             self.assertRaises(LLMError) as raised,
         ):
             llm = HttpLLM(Config.from_env(Path(tmp)))
@@ -260,6 +295,122 @@ class LLMTests(unittest.TestCase):
             )
 
         self.assertEqual(llm.providers, [("anthropic", "claude-sonnet-4-20250514")])
+
+    def test_http_llm_routes_openrouter_prefix_to_openrouter(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "x", "OPENROUTER_API_KEY": "x"},
+                clear=True,
+            ),
+        ):
+            llm = RoutingLLM(Config.from_env(Path(tmp)))
+            llm.review(
+                "correctness",
+                _issue(),
+                "diff --git a/app.py b/app.py",
+                model="openrouter/google/gemini-2.5-pro",
+            )
+
+        self.assertEqual(llm.providers, [("openrouter", "openrouter/google/gemini-2.5-pro")])
+
+    def test_openrouter_default_routes_provider_prefixed_models_through_openrouter(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "LLM_PROVIDER": "openrouter",
+                    "OPENROUTER_API_KEY": "x",
+                    "REVIEW_MODEL": "anthropic/claude-sonnet-4",
+                },
+                clear=True,
+            ),
+        ):
+            llm = RoutingLLM(Config.from_env(Path(tmp)))
+            llm.review("correctness", _issue(), "diff --git a/app.py b/app.py")
+
+        self.assertEqual(llm.providers, [("openrouter", "anthropic/claude-sonnet-4")])
+
+    def test_openrouter_http_request_uses_openai_compatible_shape(self) -> None:
+        captured = {}
+        token = "sk-or-v1-" + ("A" * 40)
+
+        def fake_urlopen(request, data=None, timeout=None):
+            captured["url"] = request.full_url
+            captured["headers"] = {key.lower(): value for key, value in request.header_items()}
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            payload = {
+                "choices": [
+                    {"message": {"content": '{"ready": true, "questions": [], "reason": "ok"}'}}
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 4,
+                    "total_tokens": 14,
+                    "cost": 0.00014,
+                },
+            }
+            return FakeHTTPResponse(json.dumps(payload).encode("utf-8"))
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "LLM_PROVIDER": "openrouter",
+                    "OPENROUTER_API_KEY": token,
+                    "OPENROUTER_HTTP_REFERER": "https://example.invalid/autobot",
+                    "OPENROUTER_APP_TITLE": "Autobot",
+                    "TRIAGE_MODEL": "openrouter/anthropic/claude-sonnet-4",
+                },
+                clear=True,
+            ),
+            patch("autobot.llm_http.urllib.request.urlopen", side_effect=fake_urlopen),
+        ):
+            decision = HttpLLM(Config.from_env(Path(tmp))).triage(_issue(), [])
+
+        self.assertTrue(decision.ready)
+        self.assertEqual(decision.usage.dollars, 0.00014)
+        self.assertEqual(captured["url"], "https://openrouter.ai/api/v1/chat/completions")
+        self.assertEqual(captured["body"]["model"], "anthropic/claude-sonnet-4")
+        self.assertEqual(captured["body"]["response_format"], {"type": "json_object"})
+        self.assertEqual(captured["headers"]["authorization"], f"Bearer {token}")
+        self.assertEqual(captured["headers"]["http-referer"], "https://example.invalid/autobot")
+        self.assertEqual(captured["headers"]["x-openrouter-title"], "Autobot")
+
+    def test_openrouter_retries_without_response_format_when_unsupported(self) -> None:
+        calls = []
+        success = {
+            "choices": [{"message": {"content": '{"findings": []}'}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+        }
+
+        def fake_post(url, token, body):
+            calls.append(body)
+            if len(calls) == 1:
+                raise LLMHTTPError("OpenRouter request failed: 400 unsupported response_format")
+            return success
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {"LLM_PROVIDER": "openrouter", "OPENROUTER_API_KEY": "x"},
+                clear=True,
+            ),
+            patch("autobot.llm_clients._openrouter_post", side_effect=fake_post),
+        ):
+            review = HttpLLM(Config.from_env(Path(tmp))).review(
+                "correctness",
+                _issue(),
+                "diff --git a/app.py b/app.py",
+            )
+
+        self.assertEqual(review.findings, [])
+        self.assertIn("response_format", calls[0])
+        self.assertNotIn("response_format", calls[1])
 
     def test_pricing_uses_role_specific_env_vars(self) -> None:
         with patch.dict(

@@ -10,8 +10,17 @@ from autobot.audit import AuditLog
 from autobot.config import Config
 from autobot.context import gather_context
 from autobot.cost import CostLedger
+from autobot.harness import (
+    HarnessResult,
+    HarnessSession,
+    HarnessTask,
+    HarnessTaskKind,
+    PlanningResult,
+    build_harness_adapter,
+)
 from autobot.labels import set_issue_label
 from autobot.models import FileChange, Issue, IssueRecord, IssueState, utc_now
+from autobot.pi_harness import pi_container_env_names
 from autobot.pr_flow import finalize_draft_pr
 from autobot.review import ReviewerPanel, format_blockers, review_round_artifact
 from autobot.scanner import ensure_no_secret_like_values
@@ -31,6 +40,8 @@ class WorkArtifacts:
     detected: VerificationCommands
     verification_commands: list[str]
     test_output: str
+    changed_paths: list[str]
+    planner: PlanningResult | None = None
 
 
 class ImplementationRunner:
@@ -63,15 +74,30 @@ class ImplementationRunner:
         self.store.upsert(record)
         dry_run = self.config.dry_run
         sandbox = self._sandbox(repo_dir)
+        harness = None
         try:
             if not dry_run:
                 set_issue_label(self.tracker, self.audit, record, issue, "agent-working")
                 sandbox.prepare()
-            artifacts = self._test_and_implement(issue, record, ledger, repo_dir, sandbox)
-            self._review_loop(issue, record, ledger, repo_dir, sandbox, artifacts)
-            self._scan_final_diff(repo_dir, _unique_paths(artifacts.all_changes))
+            harness = build_harness_adapter(self.config, self.llm).start(
+                repo_dir,
+                sandbox=sandbox,
+                dry_run=dry_run,
+            )
+            planner = self._run_planner(issue, record, ledger, repo_dir, sandbox, harness)
+            artifacts = self._test_and_implement(
+                issue,
+                record,
+                ledger,
+                repo_dir,
+                sandbox,
+                harness,
+                planner,
+            )
+            self._review_loop(issue, record, ledger, repo_dir, sandbox, harness, artifacts)
+            self._scan_final_diff(repo_dir, artifacts.changed_paths)
             if dry_run:
-                return self._finish_dry_run(record, ledger, artifacts.all_changes)
+                return self._finish_dry_run(record, ledger, artifacts.changed_paths)
             sandbox.close()
             return finalize_draft_pr(
                 issue,
@@ -84,9 +110,11 @@ class ImplementationRunner:
                 self.tracker,
                 self.audit,
                 self.store,
-                _unique_paths(artifacts.all_changes),
+                artifacts.changed_paths,
             )
         finally:
+            if harness is not None:
+                harness.close()
             if not dry_run:
                 sandbox.close()
 
@@ -97,7 +125,41 @@ class ImplementationRunner:
             self.config.sandbox_image,
             setup,
             self.config.sandbox_network,
+            env_names=pi_container_env_names(self.config),
+            mode="copy" if self.config.sandbox_backend == "docker-copy" else "bind",
         )
+
+    def _run_planner(
+        self,
+        issue: Issue,
+        record: IssueRecord,
+        ledger: CostLedger,
+        repo_dir: Path,
+        sandbox: sandbox_ops.DockerSandbox,
+        harness: HarnessSession,
+    ) -> PlanningResult | None:
+        if not self.config.planner_enabled:
+            return None
+        if self.config.dry_run or self.config.mock_llm:
+            planner = harness
+        elif self.config.planner_harness == "pi":
+            from autobot.pi_harness import PiHarnessAdapter
+
+            planner = PiHarnessAdapter(self.config).start_planner(repo_dir, sandbox)
+        else:
+            raise RuntimeError(f"unknown planner harness: {self.config.planner_harness}")
+        try:
+            result = planner.plan(
+                HarnessTask(HarnessTaskKind.PLANNING, issue, gather_context(repo_dir, issue))
+            )
+        finally:
+            if planner is not harness:
+                planner.close()
+        ledger.add(result.usage)
+        self.pause_if_budget_hit(issue, record, ledger, "planning")
+        record.plan["planner"] = result.model_dump()
+        self.store.upsert(record)
+        return result
 
     def _test_and_implement(
         self,
@@ -106,48 +168,80 @@ class ImplementationRunner:
         ledger: CostLedger,
         repo_dir: Path,
         sandbox: sandbox_ops.DockerSandbox,
+        harness: HarnessSession,
+        planner: PlanningResult | None,
     ) -> WorkArtifacts:
         dry_run = self.config.dry_run
-        test_plan = self.llm.write_tests(issue, gather_context(repo_dir, issue))
-        ledger.add(test_plan.usage)
+        planning_context = planner.as_prompt_context() if planner is not None else None
+        test_result = harness.run(
+            HarnessTask(
+                HarnessTaskKind.TEST_AUTHOR,
+                issue,
+                gather_context(repo_dir, issue),
+                planning_context=planning_context,
+            )
+        )
+        ledger.add(test_result.usage)
         self.pause_if_budget_hit(issue, record, ledger, "test authoring")
-        if not test_plan.changes:
+        if not _result_paths(test_result):
             raise RuntimeError("test author returned no changes")
-        sandbox_ops.apply_changes(repo_dir, sandbox, test_plan.changes, dry_run)
+        _apply_harness_result(repo_dir, sandbox, test_result, dry_run)
         baseline_commands = _baseline_test_commands(
             repo_dir,
-            test_plan.test_commands,
+            test_result.test_commands,
             self.config.default_test_command,
         )
         baseline = sandbox_ops.run_verification_allow_failure(sandbox, baseline_commands, dry_run)
-        plan = self.llm.implement(issue, gather_context(repo_dir, issue))
-        ledger.add(plan.usage)
+        plan_result = harness.run(
+            HarnessTask(
+                HarnessTaskKind.IMPLEMENT,
+                issue,
+                gather_context(repo_dir, issue),
+                planning_context=planning_context,
+            )
+        )
+        ledger.add(plan_result.usage)
         self.pause_if_budget_hit(issue, record, ledger, "implementation")
-        if not plan.changes:
+        if not _result_paths(plan_result):
             raise RuntimeError("implementer returned no changes")
-        all_changes = [*test_plan.changes, *plan.changes]
-        impl_commands = list(plan.test_commands)
+        all_changes = [*test_result.changes, *plan_result.changes]
+        changed_paths = _unique_strings([*_result_paths(test_result), *_result_paths(plan_result)])
+        impl_commands = list(plan_result.test_commands)
         sandbox_ops.ensure_no_secret_commands([*baseline_commands, *impl_commands])
         record.plan = _plan_artifact(
-            test_plan.plan,
+            test_result.plan,
             baseline,
-            plan.plan,
+            plan_result.plan,
             baseline_commands,
-            plan.test_commands,
+            plan_result.test_commands,
         )
+        if planner is not None:
+            record.plan["planner"] = planner.model_dump()
         self.store.upsert(record)
-        sandbox_ops.apply_changes(repo_dir, sandbox, plan.changes, dry_run)
+        _apply_harness_result(repo_dir, sandbox, plan_result, dry_run)
         detected = detect_verification_commands(repo_dir, self.config.default_test_command)
         commands = merge_commands(baseline_commands, impl_commands, detected)
-        output = self._run_verification(record, sandbox, commands, dry_run)
-        return WorkArtifacts(
+        artifacts = WorkArtifacts(
             all_changes,
             baseline_commands,
             impl_commands,
             detected,
             commands,
-            output,
+            "",
+            changed_paths,
+            planner,
         )
+        self._run_verification_with_fixes(
+            issue,
+            record,
+            ledger,
+            repo_dir,
+            sandbox,
+            harness,
+            artifacts,
+            dry_run,
+        )
+        return artifacts
 
     def _review_loop(
         self,
@@ -156,6 +250,7 @@ class ImplementationRunner:
         ledger: CostLedger,
         repo_dir: Path,
         sandbox: sandbox_ops.DockerSandbox,
+        harness: HarnessSession,
         artifacts: WorkArtifacts,
     ) -> None:
         dry_run = self.config.dry_run
@@ -166,7 +261,7 @@ class ImplementationRunner:
             record.review_rounds = round_number
             outcome = panel.review(
                 issue,
-                self._scan_final_diff(repo_dir, _unique_paths(artifacts.all_changes)),
+                self._review_input(repo_dir, artifacts),
                 ledger,
             )
             conversation = WorkflowConversation.from_record(record)
@@ -178,25 +273,104 @@ class ImplementationRunner:
                 return
             if round_number >= self.config.max_review_rounds:
                 raise RuntimeError("review loop stopped with blocking findings")
-            fix = self.llm.implement(
-                issue,
-                gather_context(repo_dir, issue),
-                format_blockers(outcome.blocking_findings),
+            fix = harness.run(
+                HarnessTask(
+                    HarnessTaskKind.REVIEW_FIX,
+                    issue,
+                    gather_context(repo_dir, issue),
+                    format_blockers(outcome.blocking_findings),
+                    planning_context=(
+                        artifacts.planner.as_prompt_context()
+                        if artifacts.planner is not None
+                        else None
+                    ),
+                )
             )
             ledger.add(fix.usage)
             self.pause_if_budget_hit(issue, record, ledger, "review fix")
-            if not fix.changes:
+            if not _result_paths(fix):
                 raise RuntimeError("implementer returned no fixes for blocking findings")
             artifacts.all_changes.extend(fix.changes)
             artifacts.impl_commands.extend(fix.test_commands)
-            sandbox_ops.apply_changes(repo_dir, sandbox, fix.changes, dry_run)
+            artifacts.changed_paths = _unique_strings(
+                [*artifacts.changed_paths, *_result_paths(fix)]
+            )
+            _apply_harness_result(repo_dir, sandbox, fix, dry_run)
             commands = merge_commands(
                 artifacts.authored_commands,
                 artifacts.impl_commands,
                 artifacts.detected,
             )
             artifacts.verification_commands = commands
-            artifacts.test_output = self._run_verification(record, sandbox, commands, dry_run)
+            self._run_verification_with_fixes(
+                issue,
+                record,
+                ledger,
+                repo_dir,
+                sandbox,
+                harness,
+                artifacts,
+                dry_run,
+            )
+
+    def _run_verification_with_fixes(
+        self,
+        issue: Issue,
+        record: IssueRecord,
+        ledger: CostLedger,
+        repo_dir: Path,
+        sandbox: sandbox_ops.DockerSandbox,
+        harness: HarnessSession,
+        artifacts: WorkArtifacts,
+        dry_run: bool,
+    ) -> None:
+        for attempt in range(1, self.config.max_review_rounds + 1):
+            try:
+                artifacts.test_output = self._run_verification(
+                    record,
+                    sandbox,
+                    artifacts.verification_commands,
+                    dry_run,
+                )
+                return
+            except sandbox_ops.SandboxError as exc:
+                if attempt >= self.config.max_review_rounds:
+                    raise
+                fix = harness.run(
+                    HarnessTask(
+                        HarnessTaskKind.VERIFICATION_FIX,
+                        issue,
+                        gather_context(repo_dir, issue),
+                        [_verification_failure_blocker(exc)],
+                        planning_context=(
+                            artifacts.planner.as_prompt_context()
+                            if artifacts.planner is not None
+                            else None
+                        ),
+                    )
+                )
+                ledger.add(fix.usage)
+                self.pause_if_budget_hit(issue, record, ledger, "verification fix")
+                if not _result_paths(fix):
+                    raise RuntimeError(
+                        "implementer returned no fixes for verification failure"
+                    ) from exc
+                artifacts.authored_commands = _drop_failed_commands(
+                    artifacts.authored_commands, exc
+                )
+                artifacts.impl_commands = _drop_failed_commands(artifacts.impl_commands, exc)
+                artifacts.all_changes.extend(fix.changes)
+                artifacts.impl_commands.extend(fix.test_commands)
+                artifacts.changed_paths = _unique_strings(
+                    [*artifacts.changed_paths, *_result_paths(fix)]
+                )
+                _apply_harness_result(repo_dir, sandbox, fix, dry_run)
+                artifacts.verification_commands = merge_commands(
+                    artifacts.authored_commands,
+                    artifacts.impl_commands,
+                    artifacts.detected,
+                )
+        raise RuntimeError("verification loop exhausted unexpectedly")
 
     def _run_verification(
         self,
@@ -205,6 +379,7 @@ class ImplementationRunner:
         commands: list[str],
         dry_run: bool,
     ) -> str:
+        commands = sandbox_ops.normalize_verification_commands(commands)
         sandbox_ops.ensure_no_secret_commands(commands)
         record.plan["verification_commands"] = commands
         self.store.upsert(record)
@@ -215,13 +390,19 @@ class ImplementationRunner:
         ensure_no_secret_like_values(diff, "diff")
         return diff
 
+    def _review_input(self, repo_dir: Path, artifacts: WorkArtifacts) -> str:
+        diff = self._scan_final_diff(repo_dir, artifacts.changed_paths)
+        if artifacts.planner is None:
+            return diff
+        return diff + "\n\nPlanner artifact:\n" + artifacts.planner.as_prompt_context()
+
     def _finish_dry_run(
         self,
         record: IssueRecord,
         ledger: CostLedger,
-        all_changes: list[FileChange],
+        changed_paths: list[str],
     ) -> str:
-        record.files_touched = _unique_paths(all_changes)
+        record.files_touched = changed_paths
         conversation = WorkflowConversation.from_record(record)
         conversation.record_pr_open("dry-run://draft-pr", {"state": "dry-run"})
         conversation.save(record)
@@ -262,4 +443,39 @@ def _baseline_test_commands(
 
 
 def _unique_paths(changes: list[FileChange]) -> list[str]:
-    return list(dict.fromkeys(change.path for change in changes))
+    return _unique_strings([change.path for change in changes])
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+def _result_paths(result: HarnessResult) -> list[str]:
+    return result.changed_paths or _unique_paths(result.changes)
+
+
+def _verification_failure_blocker(exc: Exception) -> str:
+    message = str(exc)
+    if len(message) > 4000:
+        message = message[:4000] + "...[truncated]"
+    return (
+        "[high] Verification failed. Fix the implementation so every verification "
+        f"command passes before review.\n{message}"
+    )
+
+
+def _drop_failed_commands(commands: list[str], exc: Exception) -> list[str]:
+    message = str(exc)
+    return [command for command in commands if f"$ {command}\n" not in message]
+
+
+def _apply_harness_result(
+    repo_dir: Path,
+    sandbox: sandbox_ops.DockerSandbox,
+    result: HarnessResult,
+    dry_run: bool,
+) -> None:
+    if not result.applied_in_workspace:
+        sandbox_ops.apply_changes(repo_dir, sandbox, result.changes, dry_run)
+    if not dry_run:
+        sandbox.sync_to_host(_result_paths(result))

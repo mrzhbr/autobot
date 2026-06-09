@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import urllib.request
 from typing import Any
 
 from autobot.config import (
@@ -15,7 +13,8 @@ from autobot.config import (
     provider_for_model,
 )
 from autobot.context import format_context
-from autobot.llm_http import LLMHTTPError, post_json, read_http_json
+from autobot.llm_clients import anthropic_json, openai_json, openrouter_json
+from autobot.llm_http import LLMHTTPError, post_json
 from autobot.models import (
     ContextFile,
     FileChange,
@@ -115,7 +114,11 @@ class HttpLLM:
     def triage(self, issue: Issue, context: list[ContextFile]) -> TriageDecision:
         prompt = (
             "Decide if this issue is specified enough to implement without guessing. "
-            "Ask only when a wrong guess is likely. Return JSON with keys: "
+            "Ask only when a product or acceptance-criteria choice is genuinely missing. "
+            "Do not ask where files, functions, call sites, tests, or project setup are; "
+            "those are implementation details to discover from the repo context during "
+            "implementation. Treat prior Autobot clarification questions as non-authoritative "
+            "unless a human reply answers them. Return JSON with keys: "
             "ready boolean, questions array of strings, reason string.\n\n"
             f"{_issue_prompt(issue)}\n\nComments:\n{_comments(issue)}\n\n"
             f"Repo context:\n{format_context(context)}"
@@ -204,6 +207,7 @@ class HttpLLM:
         prompt = (
             f"Review this diff with the lens: {lens}. Return strict JSON with key findings. "
             "Each finding has severity, file, line, message, blocking boolean. "
+            "Severity must be one of: info, low, medium, high, critical. "
             "Blocking means the PR should not be opened until fixed.\n\n"
             f"{_issue_prompt(issue)}\n\nComments:\n{_comments(issue)}\n\n"
             f"Diff:\n{_prompt_diff(diff)}"
@@ -225,7 +229,7 @@ class HttpLLM:
         return ReviewReport(lens=lens, findings=findings, usage=usage)
 
     def _json_call(self, role: str, model: str, prompt: str) -> tuple[dict[str, Any], Usage]:
-        if self.provider not in {"openai", "anthropic"}:
+        if self.provider not in {"openai", "anthropic", "openrouter"}:
             raise LLMError(f"unknown LLM_PROVIDER: {self.provider}")
         missing = missing_model_keys(self.provider, [model])
         if missing:
@@ -235,18 +239,12 @@ class HttpLLM:
             return self._anthropic_json(role, model, prompt)
         if provider == "openai":
             return self._openai_json(role, model, prompt)
+        if provider == "openrouter":
+            return self._openrouter_json(role, model, prompt)
         raise LLMError(f"unknown LLM_PROVIDER: {provider}")
 
     def _openai_json(self, role: str, model: str, prompt: str) -> tuple[dict[str, Any], Usage]:
-        token = os.getenv("OPENAI_API_KEY")
-        if not token:
-            raise LLMError("OPENAI_API_KEY is required unless AUTOBOT_MOCK_LLM=1")
-        body = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object"},
-        }
-        data = _post_json("https://api.openai.com/v1/chat/completions", token, body)
+        data = _client_json(lambda: openai_json(model, prompt))
         content = data["choices"][0]["message"]["content"]
         usage = data.get("usage", {})
         return _parse_json(content), Usage(
@@ -258,22 +256,7 @@ class HttpLLM:
         )
 
     def _anthropic_json(self, role: str, model: str, prompt: str) -> tuple[dict[str, Any], Usage]:
-        token = os.getenv("ANTHROPIC_API_KEY")
-        if not token:
-            raise LLMError("ANTHROPIC_API_KEY is required unless AUTOBOT_MOCK_LLM=1")
-        request = urllib.request.Request("https://api.anthropic.com/v1/messages", method="POST")
-        request.add_header("x-api-key", token)
-        request.add_header("anthropic-version", "2023-06-01")
-        request.add_header("content-type", "application/json")
-        body = json.dumps(
-            {
-                "model": model,
-                "max_tokens": 4096,
-                "system": "Return only valid JSON.",
-                "messages": [{"role": "user", "content": prompt}],
-            }
-        ).encode("utf-8")
-        data = _read_http_json(request, "Anthropic", body)
+        data = _client_json(lambda: anthropic_json(model, prompt))
         content = "".join(part.get("text", "") for part in data.get("content", []))
         usage = data.get("usage", {})
         return _parse_json(content), Usage(
@@ -282,6 +265,18 @@ class HttpLLM:
             input_tokens=int(usage.get("input_tokens") or 0),
             output_tokens=int(usage.get("output_tokens") or 0),
             dollars=_priced(role, usage.get("input_tokens"), usage.get("output_tokens")),
+        )
+
+    def _openrouter_json(self, role: str, model: str, prompt: str) -> tuple[dict[str, Any], Usage]:
+        data = _client_json(lambda: openrouter_json(model, prompt))
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        return _parse_json(content), Usage(
+            role=role,
+            model=model,
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+            dollars=_openrouter_cost(role, usage),
         )
 
 
@@ -298,11 +293,18 @@ def _post_json(url: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
         raise LLMError(str(exc)) from exc
 
 
-def _read_http_json(request: urllib.request.Request, provider: str, data: bytes | None = None):
+def _client_json(call):
     try:
-        return read_http_json(request, provider, data)
+        return call()
     except LLMHTTPError as exc:
         raise LLMError(str(exc)) from exc
+
+
+def _openrouter_cost(role: str, usage: dict[str, Any]) -> float | None:
+    cost = usage.get("cost")
+    if cost is not None:
+        return float(cost)
+    return _priced(role, usage.get("prompt_tokens"), usage.get("completion_tokens"))
 
 
 def _parse_json(text: str) -> dict[str, Any]:

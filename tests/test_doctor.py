@@ -49,6 +49,23 @@ def leaking_git_identity_command(command, capture_output, text, check, timeout):
     return passing_command(command, capture_output, text, check, timeout)
 
 
+def pi_missing_command(command, capture_output, text, check, timeout):
+    if command[:3] == ["docker", "run", "--rm"]:
+        return SimpleNamespace(returncode=127, stdout="", stderr="sh: pi: not found")
+    return passing_command(command, capture_output, text, check, timeout)
+
+
+class RecordingCommandRunner:
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+
+    def __call__(self, command, capture_output, text, check, timeout):
+        self.commands.append(command)
+        if command[:3] == ["docker", "run", "--rm"]:
+            return SimpleNamespace(returncode=0, stdout="0.75.5\n", stderr="")
+        return passing_command(command, capture_output, text, check, timeout)
+
+
 class FakeTracker:
     def __init__(self, token: str | None, agent_login: str | None) -> None:
         self.token = token
@@ -175,7 +192,10 @@ class DoctorTests(unittest.TestCase):
             by_name = {check.name: check for check in checks}
             self.assertFalse(doctor_ok(checks))
             self.assertEqual(by_name["llm key"].status, "fail")
-            self.assertIn("LLM_PROVIDER must be openai or anthropic", by_name["llm key"].message)
+            self.assertIn(
+                "LLM_PROVIDER must be openai, anthropic, or openrouter",
+                by_name["llm key"].message,
+            )
 
     def test_live_doctor_uses_anthropic_default_model_for_anthropic_key(self) -> None:
         env = {"GITHUB_TOKEN": "x", "ANTHROPIC_API_KEY": "x"}
@@ -188,6 +208,136 @@ class DoctorTests(unittest.TestCase):
             self.assertTrue(doctor_ok(checks))
             self.assertEqual(by_name["llm key"].message, "ANTHROPIC_API_KEY is set")
             self.assertEqual(by_name["triage model"].message, "claude-sonnet-4-20250514")
+
+    def test_live_doctor_uses_openrouter_default_model_for_openrouter_key(self) -> None:
+        env = {"GITHUB_TOKEN": "x", "OPENROUTER_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertTrue(doctor_ok(checks))
+            self.assertEqual(by_name["llm key"].message, "OPENROUTER_API_KEY is set")
+            self.assertEqual(by_name["triage model"].message, "openai/gpt-4.1")
+            self.assertIn("openrouter", by_name["llm model/provider"].message)
+
+    def test_live_doctor_fails_openrouter_model_when_key_is_missing(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENAI_API_KEY": "x",
+            "REVIEW_MODELS": "gpt-4.1,openrouter/google/gemini-2.5-pro",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["llm model/provider"].status, "fail")
+            self.assertIn("OPENROUTER_API_KEY", by_name["llm model/provider"].message)
+            self.assertIn("openrouter/google/gemini-2.5-pro", by_name["llm model/provider"].message)
+
+    def test_live_doctor_fails_pi_harness_without_sandbox_network_egress(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENROUTER_API_KEY": "x",
+            "IMPLEMENT_HARNESS": "pi",
+            "HARNESS_MODEL": "openrouter/google/gemini-2.5-pro",
+            "SANDBOX_NETWORK": "none",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["implementation harness"].status, "fail")
+            self.assertIn("requires SANDBOX_NETWORK", by_name["implementation harness"].message)
+
+    def test_live_doctor_accepts_pi_harness_with_provider_key_and_network(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENROUTER_API_KEY": "x",
+            "IMPLEMENT_HARNESS": "pi",
+            "HARNESS_MODEL": "openrouter/google/gemini-2.5-pro",
+            "SANDBOX_NETWORK": "bridge",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+            runner = RecordingCommandRunner()
+
+            checks = run_doctor(config, command_runner=runner, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertTrue(doctor_ok(checks))
+            self.assertEqual(by_name["implementation harness"].status, "pass")
+            self.assertIn("pi 0.75.5 using openrouter", by_name["implementation harness"].message)
+            docker_run = next(
+                command for command in runner.commands if command[:3] == ["docker", "run", "--rm"]
+            )
+            self.assertIn("python:3.12-slim", docker_run)
+            self.assertIn("PI_CODING_AGENT_DIR=/tmp/autobot-pi-agent", docker_run[-1])
+
+    def test_live_doctor_accepts_enabled_pi_planner_with_provider_key_and_network(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENROUTER_API_KEY": "x",
+            "PLANNER_ENABLED": "1",
+            "PLANNER_LLM_PROVIDER": "openrouter",
+            "PLANNER_MODEL": "openrouter/anthropic/claude-opus-4.8",
+            "SANDBOX_NETWORK": "bridge",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+            runner = RecordingCommandRunner()
+
+            checks = run_doctor(config, command_runner=runner, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertTrue(doctor_ok(checks))
+            self.assertEqual(by_name["planner model"].status, "pass")
+            self.assertEqual(by_name["planner harness"].status, "pass")
+            self.assertIn("claude-opus-4.8", by_name["planner harness"].message)
+
+    def test_live_doctor_fails_enabled_pi_planner_without_sandbox_network_egress(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENROUTER_API_KEY": "x",
+            "PLANNER_ENABLED": "1",
+            "PLANNER_LLM_PROVIDER": "openrouter",
+            "PLANNER_MODEL": "openrouter/anthropic/claude-opus-4.8",
+            "SANDBOX_NETWORK": "none",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["planner harness"].status, "fail")
+            self.assertIn("requires SANDBOX_NETWORK", by_name["planner harness"].message)
+
+    def test_live_doctor_fails_pi_harness_when_image_lacks_pi(self) -> None:
+        env = {
+            "GITHUB_TOKEN": "x",
+            "OPENROUTER_API_KEY": "x",
+            "IMPLEMENT_HARNESS": "pi",
+            "HARNESS_MODEL": "openrouter/google/gemini-2.5-pro",
+            "SANDBOX_NETWORK": "bridge",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=pi_missing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["implementation harness"].status, "fail")
+            self.assertIn("Pi CLI is not available", by_name["implementation harness"].message)
 
     def test_live_doctor_fails_review_model_when_matching_key_is_missing(self) -> None:
         env = {

@@ -81,7 +81,10 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         processor.assert_not_called()
-        self.assertIn("OPENAI_API_KEY or ANTHROPIC_API_KEY is required", stderr.getvalue())
+        self.assertIn(
+            "OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY is required",
+            stderr.getvalue(),
+        )
 
     def test_live_run_requires_provider_specific_llm_key(self) -> None:
         with (
@@ -99,6 +102,22 @@ class CliTests(unittest.TestCase):
         processor.assert_not_called()
         self.assertIn("OPENAI_API_KEY is required", stderr.getvalue())
 
+    def test_live_run_requires_openrouter_key_when_provider_is_openrouter(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"GITHUB_TOKEN": "x", "LLM_PROVIDER": "openrouter"},
+                clear=True,
+            ),
+            patch("autobot.cli._processor") as processor,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 1)
+        processor.assert_not_called()
+        self.assertIn("OPENROUTER_API_KEY is required", stderr.getvalue())
+
     def test_live_run_rejects_unknown_llm_provider_before_processor(self) -> None:
         with (
             patch.dict(
@@ -113,7 +132,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         processor.assert_not_called()
-        self.assertIn("LLM_PROVIDER must be openai or anthropic", stderr.getvalue())
+        self.assertIn("LLM_PROVIDER must be openai, anthropic, or openrouter", stderr.getvalue())
 
     def test_live_run_rejects_review_model_when_matching_key_is_missing(self) -> None:
         with (
@@ -240,6 +259,46 @@ class CliTests(unittest.TestCase):
         config = build_processor.call_args.args[0]
         self.assertEqual(config.implement_model, "claude-sonnet-4-20250514")
 
+    def test_live_run_accepts_openrouter_key_without_direct_provider_key(self) -> None:
+        processor = FakeWatchProcessor()
+        with (
+            patch.dict(
+                "os.environ",
+                {"GITHUB_TOKEN": "x", "OPENROUTER_API_KEY": "x"},
+                clear=True,
+            ),
+            patch("autobot.cli._ensure_live_prereqs"),
+            patch("autobot.cli._processor", return_value=processor) as build_processor,
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 0)
+        self.assertIn('"state": "pr_open"', stdout.getvalue())
+        config = build_processor.call_args.args[0]
+        self.assertEqual(config.implement_model, "openai/gpt-4.1")
+
+    def test_live_run_requires_pi_harness_provider_key_before_processor(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "GITHUB_TOKEN": "x",
+                    "OPENAI_API_KEY": "x",
+                    "IMPLEMENT_HARNESS": "pi",
+                    "HARNESS_MODEL": "openrouter/google/gemini-2.5-pro",
+                },
+                clear=True,
+            ),
+            patch("autobot.cli._processor") as processor,
+            redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 1)
+        processor.assert_not_called()
+        self.assertIn("OPENROUTER_API_KEY is required for Pi harness", stderr.getvalue())
+
     def test_live_run_preflight_failure_before_processor(self) -> None:
         with (
             patch.dict("os.environ", {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}, clear=True),
@@ -271,7 +330,10 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         tracker.assert_not_called()
-        self.assertIn("OPENAI_API_KEY or ANTHROPIC_API_KEY is required", stderr.getvalue())
+        self.assertIn(
+            "OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY is required",
+            stderr.getvalue(),
+        )
 
     def test_live_watch_rejects_invalid_llm_pricing_before_tracker(self) -> None:
         with (
@@ -488,6 +550,93 @@ class CliTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["state"], "not_found")
             self.assertFalse(payload["deleted"])
+
+    def test_state_show_reports_record_with_latest_learning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state.db"
+            store = StateStore(db)
+            record = IssueRecord(
+                repo="owner/repo",
+                issue_number=7,
+                state=IssueState.PR_OPEN,
+                branch="autobot/issue-7",
+                pr_url="https://github.test/pull/7",
+                review_rounds=1,
+                files_touched=["README.md"],
+                plan={"verification_commands": ["python -m unittest"]},
+                cost={"dollars": 0.01},
+                conversation={
+                    "run_learnings": [
+                        {
+                            "at": "2026-06-08T00:00:00+00:00",
+                            "state": "waiting",
+                            "message": "waiting",
+                            "observations": ["old"],
+                            "learnings": ["old"],
+                            "follow_up_actions": [],
+                        },
+                        {
+                            "at": "2026-06-08T01:00:00+00:00",
+                            "state": "pr_open",
+                            "message": "opened draft pull request",
+                            "observations": ["Draft PR reached after 1 review round(s)."],
+                            "learnings": ["Keep review evidence together."],
+                            "follow_up_actions": [],
+                        },
+                    ],
+                    "pr_url": "https://github.test/pull/7",
+                },
+            )
+            store.upsert(record)
+
+            with redirect_stdout(io.StringIO()) as stdout:
+                code = cli.main(
+                    [
+                        "state",
+                        "show",
+                        "--repo",
+                        "owner/repo",
+                        "--issue",
+                        "7",
+                        "--db",
+                        str(db),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue(payload["found"])
+            self.assertEqual(payload["state"], "pr_open")
+            self.assertEqual(payload["pr_url"], "https://github.test/pull/7")
+            self.assertEqual(payload["verification_commands"], ["python -m unittest"])
+            self.assertEqual(payload["latest_learning"]["state"], "pr_open")
+            self.assertEqual(
+                payload["latest_learning"]["learnings"],
+                ["Keep review evidence together."],
+            )
+
+    def test_state_show_reports_missing_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "state.db"
+
+            with redirect_stdout(io.StringIO()) as stdout:
+                code = cli.main(
+                    [
+                        "state",
+                        "show",
+                        "--repo",
+                        "owner/repo",
+                        "--issue",
+                        "7",
+                        "--db",
+                        str(db),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertFalse(payload["found"])
+            self.assertEqual(payload["state"], "not_found")
 
 
 if __name__ == "__main__":

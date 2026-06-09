@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Literal
+import re
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -74,6 +75,93 @@ class ReviewFindingPayload(StrictPayload):
     message: str = Field(min_length=1)
     blocking: bool
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_finding(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        finding: dict[str, Any] = dict(data)
+        blocking = finding.get("blocking") if isinstance(finding.get("blocking"), bool) else None
+        finding["severity"] = _normalize_review_severity(finding.get("severity"), blocking)
+        return finding
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def normalize_severity(cls, value: object) -> object:
+        return _normalize_review_severity(value, None)
+
 
 class ReviewPayload(StrictPayload):
     findings: list[ReviewFindingPayload] = Field(default_factory=list)
+
+
+def _normalize_review_severity(value: object, blocking: bool | None) -> object:
+    if not isinstance(value, str):
+        return value
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
+    if not normalized:
+        return value
+    if normalized in {"info", "low", "medium", "high", "critical"}:
+        return normalized
+
+    aliases = {
+        "informational": "info",
+        "note": "info",
+        "notice": "info",
+        "none": "info",
+        "ok": "info",
+        "nit": "low",
+        "nitpick": "low",
+        "suggestion": "low",
+        "recommendation": "low",
+        "optional": "low",
+        "minor": "low",
+        "small": "low",
+        "non blocking": "low",
+        "nonblocking": "low",
+        "warning": "medium",
+        "warn": "medium",
+        "concern": "medium",
+        "caution": "medium",
+        "moderate": "medium",
+        "normal": "medium",
+        "major": "high",
+        "serious": "high",
+        "error": "high",
+        "bug": "high",
+        "failure": "high",
+        "failing": "high",
+        "regression": "high",
+        "blocker": "critical",
+        "blocking": "critical",
+        "fatal": "critical",
+        "severe": "critical",
+        "catastrophic": "critical",
+        "security": "critical",
+        "vulnerability": "critical",
+        "data loss": "critical",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+
+    for marker in ("critical", "blocker", "fatal", "security", "vulnerability"):
+        if marker in normalized:
+            return "critical"
+    for marker in ("major", "serious", "error", "bug", "failure", "regression"):
+        if marker in normalized:
+            return "high"
+    for marker in ("warning", "concern", "caution", "moderate"):
+        if marker in normalized:
+            return "medium"
+    for marker in ("minor", "nit", "suggestion", "optional", "non blocking"):
+        if marker in normalized:
+            return "low"
+    for marker in ("info", "note", "notice"):
+        if marker in normalized:
+            return "info"
+
+    if blocking is True:
+        return "high"
+    if blocking is False:
+        return "low"
+    return "medium"

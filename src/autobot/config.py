@@ -6,11 +6,20 @@ from pathlib import Path
 
 OPENAI_DEFAULT_MODEL = "gpt-4.1"
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+OPENROUTER_DEFAULT_MODEL = "openai/gpt-4.1"
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4")
 ANTHROPIC_MODEL_PREFIXES = ("claude-",)
-LLM_KEY_ENV = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+OPENROUTER_MODEL_PREFIX = "openrouter/"
+LLM_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 PRICE_ROLES = ("TRIAGE", "IMPLEMENT", "TEST", "REVIEW")
 PRICE_DIRECTIONS = ("INPUT", "OUTPUT")
+IMPLEMENT_HARNESSES = ("legacy", "pi", "openhands")
+PLANNER_HARNESSES = ("pi",)
+SANDBOX_BACKENDS = ("docker-bind", "docker-copy")
 
 
 @dataclass(frozen=True)
@@ -26,6 +35,7 @@ class Config:
     implement_model: str
     review_model: str
     review_models: list[str]
+    sandbox_backend: str
     sandbox_image: str
     sandbox_network: str
     sandbox_setup_command: str | None
@@ -34,6 +44,15 @@ class Config:
     max_issue_tokens: int | None
     max_issue_dollars: float | None
     comment_limit: int
+    implement_harness: str
+    harness_llm_provider: str | None
+    harness_model: str
+    harness_timeout_seconds: int
+    harness_max_restarts: int
+    planner_enabled: bool
+    planner_harness: str
+    planner_llm_provider: str | None
+    planner_model: str
     dry_run: bool = False
     mock_llm: bool = False
 
@@ -49,6 +68,22 @@ class Config:
         base = root / ".autobot"
         provider = os.getenv("LLM_PROVIDER")
         model = os.getenv("MODEL") or _default_model(infer_llm_provider(provider))
+        triage_model = os.getenv("TRIAGE_MODEL", model)
+        implement_model = os.getenv("IMPLEMENT_MODEL", model)
+        review_model = os.getenv("REVIEW_MODEL", model)
+        harness_model = os.getenv("HARNESS_MODEL", implement_model)
+        planner_model = os.getenv("PLANNER_MODEL", review_model)
+        harness_provider = (
+            os.getenv("HARNESS_LLM_PROVIDER")
+            or model_provider_hint(harness_model)
+            or infer_llm_provider(provider)
+        )
+        planner_provider = (
+            os.getenv("PLANNER_LLM_PROVIDER")
+            or model_provider_hint(planner_model)
+            or harness_provider
+            or infer_llm_provider(provider)
+        )
         db_default = os.getenv("AUTOBOT_DB", str(base / "state.db"))
         audit_default = os.getenv("AUTOBOT_AUDIT_LOG", str(base / "audit.jsonl"))
         work_default = os.getenv("AUTOBOT_WORK_ROOT", str(base / "work"))
@@ -60,10 +95,11 @@ class Config:
             github_token=os.getenv("GITHUB_TOKEN"),
             agent_login=os.getenv("AGENT_LOGIN") or os.getenv("GITHUB_ACTOR"),
             llm_provider=provider,
-            triage_model=os.getenv("TRIAGE_MODEL", model),
-            implement_model=os.getenv("IMPLEMENT_MODEL", model),
-            review_model=os.getenv("REVIEW_MODEL", model),
-            review_models=_model_list(os.getenv("REVIEW_MODELS"), os.getenv("REVIEW_MODEL", model)),
+            triage_model=triage_model,
+            implement_model=implement_model,
+            review_model=review_model,
+            review_models=_model_list(os.getenv("REVIEW_MODELS"), review_model),
+            sandbox_backend=_sandbox_backend(),
             sandbox_image=os.getenv("SANDBOX_IMAGE", "python:3.12-slim"),
             sandbox_network=os.getenv("SANDBOX_NETWORK", "none"),
             sandbox_setup_command=os.getenv("SANDBOX_SETUP_COMMAND"),
@@ -72,6 +108,15 @@ class Config:
             max_issue_tokens=_optional_nonnegative_int("MAX_ISSUE_TOKENS"),
             max_issue_dollars=_optional_nonnegative_float("MAX_ISSUE_DOLLARS"),
             comment_limit=_bounded_int("COMMENT_LIMIT_PER_RUN", "2", minimum=0),
+            implement_harness=_implement_harness(),
+            harness_llm_provider=harness_provider,
+            harness_model=harness_model,
+            harness_timeout_seconds=_bounded_int("HARNESS_TIMEOUT_SECONDS", "1800", minimum=1),
+            harness_max_restarts=_bounded_int("HARNESS_MAX_RESTARTS", "1", minimum=0, maximum=3),
+            planner_enabled=_env_bool("PLANNER_ENABLED", default=False),
+            planner_harness=_planner_harness(),
+            planner_llm_provider=planner_provider,
+            planner_model=planner_model,
             dry_run=dry_run,
             mock_llm=mock_llm or os.getenv("AUTOBOT_MOCK_LLM") == "1",
         )
@@ -79,25 +124,32 @@ class Config:
 
 def infer_llm_provider(configured: str | None = None) -> str | None:
     if configured:
-        return configured
+        return configured.strip().lower()
     if os.getenv("OPENAI_API_KEY"):
         return "openai"
     if os.getenv("ANTHROPIC_API_KEY"):
         return "anthropic"
+    if os.getenv("OPENROUTER_API_KEY"):
+        return "openrouter"
     return None
 
 
 def configured_llm_models(config: Config) -> list[str]:
-    return [
+    models = [
         config.triage_model,
         config.implement_model,
         config.review_model,
         *config.review_models,
     ]
+    if config.planner_enabled:
+        models.append(config.planner_model)
+    return models
 
 
 def model_provider_hint(model: str) -> str | None:
     normalized = model.strip().lower()
+    if normalized.startswith(OPENROUTER_MODEL_PREFIX):
+        return "openrouter"
     if normalized.startswith(OPENAI_MODEL_PREFIXES):
         return "openai"
     if normalized.startswith(ANTHROPIC_MODEL_PREFIXES):
@@ -167,6 +219,30 @@ def role_price_var_names(role: str) -> list[str]:
     return [f"{role}_{direction}_PRICE_PER_1K" for direction in PRICE_DIRECTIONS]
 
 
+def _implement_harness() -> str:
+    value = os.getenv("IMPLEMENT_HARNESS", "legacy").strip().lower()
+    if value not in IMPLEMENT_HARNESSES:
+        joined = ", ".join(IMPLEMENT_HARNESSES)
+        raise ValueError(f"IMPLEMENT_HARNESS must be one of: {joined}")
+    return value
+
+
+def _planner_harness() -> str:
+    value = os.getenv("PLANNER_HARNESS", "pi").strip().lower()
+    if value not in PLANNER_HARNESSES:
+        joined = ", ".join(PLANNER_HARNESSES)
+        raise ValueError(f"PLANNER_HARNESS must be one of: {joined}")
+    return value
+
+
+def _sandbox_backend() -> str:
+    value = os.getenv("SANDBOX_BACKEND", "docker-bind").strip().lower()
+    if value not in SANDBOX_BACKENDS:
+        joined = ", ".join(SANDBOX_BACKENDS)
+        raise ValueError(f"SANDBOX_BACKEND must be one of: {joined}")
+    return value
+
+
 def price_value(name: str) -> float | None:
     value = os.getenv(name)
     if value in (None, ""):
@@ -180,6 +256,8 @@ def price_value(name: str) -> float | None:
 def _default_model(provider: str | None) -> str:
     if provider == "anthropic":
         return ANTHROPIC_DEFAULT_MODEL
+    if provider == "openrouter":
+        return OPENROUTER_DEFAULT_MODEL
     return OPENAI_DEFAULT_MODEL
 
 
@@ -234,3 +312,15 @@ def _model_list(value: str | None, fallback: str) -> list[str]:
         return [fallback]
     models = [item.strip() for item in value.split(",") if item.strip()]
     return models or [fallback]
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")

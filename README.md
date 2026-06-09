@@ -10,7 +10,7 @@ The implementation is intentionally thin but end-to-end:
 - Outward actions are appended to `.autobot/audit.jsonl`.
 - Pydantic validates structured LLM output before the pipeline acts on it.
 - The issue lifecycle runs through an explicit typed step workflow with scoped mypy coverage.
-- Live runs use GitHub Issues, GitHub PRs, Docker, and an OpenAI or Anthropic-compatible LLM path.
+- Live runs use GitHub Issues, GitHub PRs, Docker, and an OpenAI, Anthropic, or OpenRouter LLM path.
 - `--dry-run --mock-llm` exercises the state machine without comments, pushes, PRs, Docker, or LLM calls.
 
 ## Setup
@@ -36,9 +36,9 @@ export REVIEW_MODEL=gpt-4.1
 export REVIEW_MODELS=gpt-4.1
 ```
 
-`LLM_PROVIDER` may be unset, `openai`, or `anthropic`; any other value fails preflight before processing an issue.
-When `MODEL` is unset, the default model follows the inferred provider: OpenAI uses `gpt-4.1`, Anthropic uses `claude-sonnet-4-20250514`. If both provider keys are present and `LLM_PROVIDER` is unset, OpenAI is selected.
-Configured model names that clearly belong to a provider route to that provider when the matching key is set, and fail preflight when that key is missing.
+`LLM_PROVIDER` may be unset, `openai`, `anthropic`, or `openrouter`; any other value fails preflight before processing an issue.
+When `MODEL` is unset, the default model follows the inferred provider: OpenAI uses `gpt-4.1`, Anthropic uses `claude-sonnet-4-20250514`, and OpenRouter uses `openai/gpt-4.1`. If multiple provider keys are present and `LLM_PROVIDER` is unset, OpenAI is selected first.
+Configured model names that clearly belong to a provider route to that provider when the matching key is set, and fail preflight when that key is missing. Prefix a model with `openrouter/` to force that one call through OpenRouter; Autobot strips that routing prefix before sending the model ID to OpenRouter.
 
 When both provider keys are configured, reviewer rotation can use both model families:
 
@@ -55,6 +55,22 @@ export LLM_PROVIDER=anthropic
 export MODEL=claude-sonnet-4-20250514
 ```
 
+OpenRouter can be used as a provider gateway:
+
+```sh
+export OPENROUTER_API_KEY=...
+export LLM_PROVIDER=openrouter
+export MODEL=anthropic/claude-sonnet-4
+```
+
+Mixed reviewer rotation can route individual calls through OpenRouter:
+
+```sh
+export OPENAI_API_KEY=...
+export OPENROUTER_API_KEY=...
+export REVIEW_MODELS=gpt-4.1,openrouter/google/gemini-2.5-pro
+```
+
 Optional cost pricing is read from env. If unset, token usage is recorded and dollars are reported as `not configured`; live `run`, `watch`, and `doctor` fail nonnumeric pricing values before processing an issue, and `doctor` warns about missing live pricing. If `MAX_ISSUE_DOLLARS` is set, live `run`, `watch`, and `doctor` require pricing env vars so the hard dollar cap can actually be enforced.
 
 ```sh
@@ -69,6 +85,49 @@ export REVIEW_OUTPUT_PRICE_PER_1K=0.008
 ```
 
 If `TEST_*` prices are unset, test-authoring uses the configured `IMPLEMENT_*` prices.
+
+Implementation work is routed through an internal harness adapter. The default is
+the current typed LLM edit-plan path:
+
+```sh
+export IMPLEMENT_HARNESS=legacy
+```
+
+`IMPLEMENT_HARNESS=pi` runs Pi RPC inside the live Docker sandbox, keeping the
+implement-review-fix session alive across review rounds. `SANDBOX_IMAGE` must
+already provide the `pi` CLI, and `SANDBOX_NETWORK` must allow egress for model
+calls. `doctor` verifies this by running `pi --version` inside the configured
+image. Use `SANDBOX_BACKEND=docker-copy` when testing the future remote-sandbox
+architecture locally: Pi edits a private container filesystem, and Autobot syncs
+the changed paths back to the host clone before review and PR finalization.
+Harness model settings default to the implementation model and LLM provider:
+
+```sh
+export HARNESS_LLM_PROVIDER=openrouter
+export HARNESS_MODEL=openrouter/anthropic/claude-sonnet-4
+export HARNESS_TIMEOUT_SECONDS=1800
+export HARNESS_MAX_RESTARTS=1
+docker build -t autobot-pi-sandbox -f docker/pi-sandbox/Dockerfile .
+export SANDBOX_BACKEND=docker-copy
+export SANDBOX_IMAGE=autobot-pi-sandbox
+export SANDBOX_NETWORK=bridge
+```
+
+An optional read-only planner can run before test authoring and implementation.
+This starts a separate Pi RPC session with read-only tools, stores the planner
+artifact in the issue state, and injects the plan into the test author,
+implementer, verification-fix, review-fix, and reviewer prompts. The default is
+off.
+
+```sh
+export PLANNER_ENABLED=1
+export PLANNER_HARNESS=pi
+export PLANNER_LLM_PROVIDER=openrouter
+export PLANNER_MODEL=openrouter/anthropic/claude-opus-4.8
+```
+
+`IMPLEMENT_HARNESS=openhands` is accepted by config but intentionally fails
+preflight until the OpenHands baseline adapter is wired.
 
 ## Commands
 
@@ -102,10 +161,23 @@ Check live-run prerequisites without posting comments, pushing branches, or open
 ./cli doctor --repo owner/name --issue 123
 ```
 
-Live doctor checks Git, git author identity, Docker CLI and daemon access, GitHub credentials, LLM credentials, model names, LLM pricing env vars, sandbox image/network/setup settings, and optional issue readability.
+Live doctor checks Git, git author identity, Docker CLI and daemon access, GitHub credentials, LLM credentials, model names, LLM pricing env vars, implementation/planner harness settings, sandbox image/network/setup settings, and optional issue readability.
 
 Live `run` and `watch` also run a read-only preflight before cloning or processing an issue. They fail fast when required GitHub or LLM credentials are missing, provider-specific model keys are missing, configured LLM pricing values are malformed, Git author identity is missing, Docker CLI or daemon access is unavailable, or sandbox setup configuration is unsafe. Use `doctor` for the same checks plus optional issue readability.
 An empty `SANDBOX_NETWORK` is treated as an invalid live configuration.
+
+Inspect one durable issue state record, including the latest extracted run
+learning:
+
+```sh
+./cli state show --repo owner/name --issue 123
+```
+
+Clear one local issue state record before an intentional retry:
+
+```sh
+./cli state clear --repo owner/name --issue 123
+```
 
 Run a local dry-run against a public issue body:
 
@@ -165,7 +237,10 @@ Implemented defaults:
 - GitHub Issues for `IssueTracker`
 - GitHub git/API operations for `GitHost`
 - issue comments for `ChatChannel`
-- OpenAI or Anthropic HTTP calls for `LLM`
+- OpenAI, Anthropic, or OpenRouter HTTP calls for `LLM`
+- `legacy` implementation harness adapter, preserving the typed LLM edit-plan flow
+- `pi` implementation harness adapter via Pi RPC inside the Docker sandbox
+- optional `pi` read-only planner harness before implementation
 
 CI evidence combines legacy commit statuses and GitHub check runs for the pushed branch.
 
@@ -173,7 +248,7 @@ Issue reads include the newest two comment pages from GitHub pagination links, s
 
 Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.py`.
 
-Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model. Provider-hinted model names route each review call to the matching OpenAI or Anthropic adapter when the corresponding key is present. If unset, all reviewers use `REVIEW_MODEL`.
+Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model. Provider-hinted model names route each review call to the matching OpenAI, Anthropic, or OpenRouter adapter when the corresponding key is present. If unset, all reviewers use `REVIEW_MODEL`.
 
 `MAX_REVIEW_ROUNDS` defaults to `3` and must stay between `1` and `3`, preserving
 the prototype stopping rule that a draft PR cannot open without review and that
@@ -189,6 +264,11 @@ reply and rechecks the issue instead of posting a stale question.
 Each review round stores its structured reviewer reports and blocking findings in
 the issue record so the durable state shows what the reviewers accepted or asked
 the implementer to fix.
+
+Each finished run also records a deterministic `run_learnings` entry in the
+issue record. It summarizes final state, review blockers, warning counts, budget
+pauses, and follow-up actions so the next audit can inspect what the previous run
+learned without replaying logs.
 
 ## Safety
 
@@ -227,24 +307,46 @@ The prototype enforces these guardrails:
 
 ## Sandbox
 
-Live mode starts one detached `docker run --rm` container per issue with the
-checked-out repo mounted at `/work`, runs setup, writes, tests, lint, and type
-checks through `docker exec`, then stops the container after sandbox work completes.
+Live mode starts one detached `docker run --rm` container per issue, runs setup,
+writes, tests, lint, and type checks through `docker exec`, then stops the
+container after sandbox work completes.
+
+`SANDBOX_BACKEND=docker-bind` is the compatibility backend. It bind-mounts the
+checked-out host repo at `/work`, so sandbox writes immediately appear on the
+host.
+
+`SANDBOX_BACKEND=docker-copy` is the recommended local backend for the
+Cloudflare-style architecture. It copies the host clone into `/workspace/repo`
+inside the container, lets the implementer edit that private filesystem, then
+syncs changed paths back to the host clone before review, commit, push, and draft
+PR creation. This avoids host test-artifact leakage from bind mounts and matches
+the future remote-sandbox flow more closely.
 
 Useful env vars:
 
 ```sh
-export SANDBOX_IMAGE=python:3.12-slim
+export SANDBOX_BACKEND=docker-copy
+export SANDBOX_IMAGE=autobot-pi-sandbox
 export SANDBOX_NETWORK=none
-export SANDBOX_SETUP_COMMAND="python -m pip install -e .[dev]"
-export AUTO_TEST_COMMAND="python -m pytest"
+# Leave unset by default so repo metadata drives setup and verification.
+# export SANDBOX_SETUP_COMMAND="make bootstrap"
+# export AUTO_TEST_COMMAND="make test"
+```
+
+For `IMPLEMENT_HARNESS=pi`, build and use the bundled Pi sandbox image:
+
+```sh
+docker build -t autobot-pi-sandbox -f docker/pi-sandbox/Dockerfile .
+export SANDBOX_BACKEND=docker-copy
+export SANDBOX_IMAGE=autobot-pi-sandbox
+export SANDBOX_NETWORK=bridge
 ```
 
 `SANDBOX_NETWORK` defaults to `none`. Set it to `bridge` only when setup or verification commands must reach a package registry or another explicitly needed service.
 
-If `SANDBOX_SETUP_COMMAND` is unset, live mode detects common setup profiles: Python installs requirements and the editable project, using `.[dev]` only when a `dev` extra is declared; Node uses the active lockfile manager, Go runs `go mod download`, and Rust runs `cargo fetch`.
+If `SANDBOX_SETUP_COMMAND` is unset, live mode detects common setup profiles. Python `pyproject.toml` repos create an isolated bootstrap venv, install `uv`, and run `uv sync` into `.venv`, using `uv.lock` with `--locked` when present so the repo's Python requirement and locked package versions drive the environment. Legacy Python repos use `.venv` plus `pip` against `requirements*.txt` or `setup.*`; Node uses the active lockfile manager, Go runs `go mod download`, and Rust runs `cargo fetch`.
 
-If `AUTO_TEST_COMMAND` is unset, the prototype detects common project files and chooses test commands such as `pytest`, `npm test`, `go test ./...`, `cargo test`, `unittest`, or `compileall`. It also detects common lint/type checks such as Ruff, mypy, pyright, `npm run lint`, `npm run typecheck`, `go vet ./...`, and `cargo clippy --all-targets`.
+If `AUTO_TEST_COMMAND` is unset, the prototype detects common project files and chooses test commands such as `uv run python -m pytest`, `.venv/bin/python -m pytest`, `npm test`, `go test ./...`, `cargo test`, `unittest`, or `compileall`. It also detects common lint/type checks such as Ruff, mypy, pyright, `npm run lint`, `npm run typecheck`, `go vet ./...`, and `cargo clippy --all-targets`.
 
 ## Development
 

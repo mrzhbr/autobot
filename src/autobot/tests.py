@@ -54,12 +54,29 @@ def _python_commands(repo_dir: Path) -> VerificationCommands:
     types = []
     pyproject = _read_text(repo_dir / "pyproject.toml")
     if "[tool.ruff" in pyproject:
-        lint.extend(["python -m ruff check .", "python -m ruff format --check ."])
+        lint.extend(
+            [
+                _python_tool(repo_dir, "ruff check ."),
+                _python_tool(repo_dir, "ruff format --check ."),
+            ]
+        )
     if "[tool.mypy" in pyproject or (repo_dir / "mypy.ini").exists():
-        types.append("python -m mypy .")
+        types.append(_python_tool(repo_dir, "mypy ."))
     if "[tool.pyright" in pyproject or (repo_dir / "pyrightconfig.json").exists():
-        types.append("python -m pyright")
-    return VerificationCommands(tests=["python -m pytest"], lint=lint, types=types)
+        types.append(_python_tool(repo_dir, "pyright"))
+    return VerificationCommands(tests=[_python_module(repo_dir, "pytest")], lint=lint, types=types)
+
+
+def _python_module(repo_dir: Path, module: str) -> str:
+    if (repo_dir / "pyproject.toml").exists():
+        return f"UV_PROJECT_ENVIRONMENT=.venv .autobot-bootstrap/bin/uv run python -m {module}"
+    return f".venv/bin/python -m {module}"
+
+
+def _python_tool(repo_dir: Path, command: str) -> str:
+    if (repo_dir / "pyproject.toml").exists():
+        return f"UV_PROJECT_ENVIRONMENT=.venv .autobot-bootstrap/bin/uv run {command}"
+    return f".venv/bin/python -m {command}"
 
 
 def _node_commands(repo_dir: Path) -> VerificationCommands:

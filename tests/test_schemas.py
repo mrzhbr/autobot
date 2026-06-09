@@ -89,6 +89,81 @@ class SchemaTests(unittest.TestCase):
 
         self.assertEqual(payload.findings, [])
 
+    def test_review_payload_normalizes_common_severity_variants(self) -> None:
+        payload = ReviewPayload.model_validate(
+            {
+                "findings": [
+                    {
+                        "severity": "notice",
+                        "file": "src/demo.py",
+                        "line": 1,
+                        "message": "Document this edge case.",
+                        "blocking": False,
+                    },
+                    {
+                        "severity": "Minor",
+                        "file": "src/demo.py",
+                        "line": 2,
+                        "message": "Name could be clearer.",
+                        "blocking": False,
+                    },
+                    {
+                        "severity": "major",
+                        "file": "src/demo.py",
+                        "line": 3,
+                        "message": "Incorrect behavior.",
+                        "blocking": True,
+                    },
+                    {
+                        "severity": "blocker",
+                        "file": "src/demo.py",
+                        "line": 4,
+                        "message": "Cannot ship.",
+                        "blocking": True,
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(
+            [finding.severity for finding in payload.findings],
+            ["info", "low", "high", "critical"],
+        )
+
+    def test_review_payload_canonicalizes_unexpected_severity_from_blocking_flag(self) -> None:
+        payload = ReviewPayload.model_validate(
+            {
+                "findings": [
+                    {
+                        "severity": "needs attention",
+                        "file": "src/demo.py",
+                        "line": 1,
+                        "message": "Unknown blocking severity should be high.",
+                        "blocking": True,
+                    },
+                    {
+                        "severity": "cosmetic cleanup",
+                        "file": "src/demo.py",
+                        "line": 2,
+                        "message": "Unknown non-blocking severity should be low.",
+                        "blocking": False,
+                    },
+                    {
+                        "severity": "catastrophic",
+                        "file": "src/demo.py",
+                        "line": 3,
+                        "message": "Recognized severe aliases stay critical.",
+                        "blocking": True,
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(
+            [finding.severity for finding in payload.findings],
+            ["high", "low", "critical"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

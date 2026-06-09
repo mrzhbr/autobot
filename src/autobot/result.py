@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from autobot.cost import CostLedger
+from autobot.learning import record_run_learning
 from autobot.models import IssueRecord, IssueState, ProcessResult
 from autobot.scanner import redact_secret_like_values
 from autobot.state import StateStore
@@ -50,6 +51,7 @@ def finish_process(
     record.cost = cost
     if pr_url:
         record.pr_url = pr_url
+    record_run_learning(record, message)
     store.upsert(record)
     resolved_pr_url = pr_url or record.pr_url or record.conversation.get("pr_url")
     return ProcessResult(

@@ -116,6 +116,15 @@ class ClarificationAfterResume(WorkflowPayload):
     at: str
 
 
+class RunLearning(WorkflowPayload):
+    at: str
+    state: str
+    message: str
+    observations: list[str]
+    learnings: list[str]
+    follow_up_actions: list[str]
+
+
 class WorkflowConversation(WorkflowPayload):
     triage: TriageRecord | None = None
     asked_comment_id: int | None = None
@@ -134,6 +143,7 @@ class WorkflowConversation(WorkflowPayload):
     label_warnings: list[dict[str, Any]] | None = None
     audit_warnings: list[dict[str, Any]] | None = None
     finalize_warnings: list[dict[str, Any]] | None = None
+    run_learnings: list[RunLearning] | None = None
 
     @classmethod
     def from_record(cls, record: IssueRecord) -> WorkflowConversation:
@@ -250,6 +260,11 @@ class WorkflowConversation(WorkflowPayload):
     def record_pr_open(self, pr_url: str, ci_status: dict[str, Any]) -> None:
         self.ci_status = ci_status
         self.pr_url = pr_url
+
+    def record_run_learning(self, learning: RunLearning) -> None:
+        learnings = list(self.run_learnings or [])
+        learnings.append(learning)
+        self.run_learnings = learnings
 
 
 def validate_step_result(value: object) -> StepResult:

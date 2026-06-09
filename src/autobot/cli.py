@@ -10,6 +10,7 @@ from pathlib import Path
 from autobot.audit import AuditLog
 from autobot.chat import IssueCommentChat
 from autobot.config import (
+    LLM_KEY_ENV,
     Config,
     configured_llm_models,
     infer_llm_provider,
@@ -21,6 +22,7 @@ from autobot.config import (
 from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
 from autobot.llm import build_llm
+from autobot.models import IssueRecord
 from autobot.pipeline import IssueProcessor
 from autobot.scanner import redact_secret_like_values
 from autobot.state import StateStore
@@ -80,9 +82,27 @@ def _doctor(args: argparse.Namespace) -> int:
 
 
 def _state(args: argparse.Namespace) -> int:
+    if args.state_command == "show":
+        return _state_show(args)
     if args.state_command == "clear":
         return _state_clear(args)
     raise RuntimeError("state subcommand is required")
+
+
+def _state_show(args: argparse.Namespace) -> int:
+    config = _config(args, require_github=False)
+    record = StateStore(config.db_path).get(args.repo, int(args.issue))
+    if record is None:
+        payload = {
+            "repo": args.repo,
+            "issue": int(args.issue),
+            "state": "not_found",
+            "found": False,
+        }
+    else:
+        payload = _state_record_summary(record)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
 
 
 def _state_clear(args: argparse.Namespace) -> int:
@@ -96,6 +116,33 @@ def _state_clear(args: argparse.Namespace) -> int:
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
+
+
+def _state_record_summary(record: IssueRecord) -> dict:
+    return {
+        "repo": record.repo,
+        "issue": record.issue_number,
+        "state": record.state.value,
+        "found": True,
+        "branch": record.branch,
+        "blocked_on": record.blocked_on,
+        "pr_url": record.pr_url,
+        "review_rounds": record.review_rounds,
+        "files_touched": record.files_touched,
+        "verification_commands": list(record.plan.get("verification_commands") or []),
+        "cost": record.cost,
+        "latest_learning": _latest_learning(record),
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    }
+
+
+def _latest_learning(record: IssueRecord) -> dict | None:
+    learnings = record.conversation.get("run_learnings")
+    if not isinstance(learnings, list) or not learnings:
+        return None
+    latest = learnings[-1]
+    return latest if isinstance(latest, dict) else None
 
 
 def _processor(
@@ -209,17 +256,22 @@ def _ensure_live_llm_key(config: Config) -> None:
     if config.dry_run or config.mock_llm:
         return
     provider = infer_llm_provider(config.llm_provider)
-    if provider not in {None, "openai", "anthropic"}:
-        raise RuntimeError("LLM_PROVIDER must be openai or anthropic")
-    if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is required")
-    if provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
-        raise RuntimeError("ANTHROPIC_API_KEY is required")
+    if provider not in {None, *LLM_KEY_ENV}:
+        raise RuntimeError("LLM_PROVIDER must be openai, anthropic, or openrouter")
+    if provider and not os.getenv(LLM_KEY_ENV[provider]):
+        raise RuntimeError(f"{LLM_KEY_ENV[provider]} is required")
     if provider is None:
-        raise RuntimeError("OPENAI_API_KEY or ANTHROPIC_API_KEY is required")
+        raise RuntimeError("OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY is required")
     missing = missing_model_keys(provider, configured_llm_models(config))
     if missing:
         raise RuntimeError(missing_model_keys_message(missing))
+    if config.implement_harness == "pi":
+        harness_provider = config.harness_llm_provider
+        if harness_provider not in LLM_KEY_ENV:
+            raise RuntimeError("HARNESS_LLM_PROVIDER must be openai, anthropic, or openrouter")
+        key = LLM_KEY_ENV[harness_provider]
+        if not os.getenv(key):
+            raise RuntimeError(f"{key} is required for Pi harness")
     invalid = invalid_price_vars()
     if invalid:
         raise RuntimeError("LLM pricing env vars must be numeric: " + ", ".join(invalid))
@@ -264,6 +316,10 @@ def _parser() -> argparse.ArgumentParser:
 
     state = subcommands.add_parser("state", help="Inspect or modify local issue state")
     state_subcommands = state.add_subparsers(dest="state_command")
+    show = state_subcommands.add_parser("show", help="Show one local issue state record")
+    show.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
+    show.add_argument("--issue", required=True, type=int, help="GitHub issue number")
+    _common(show)
     clear = state_subcommands.add_parser("clear", help="Delete one local issue state record")
     clear.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
     clear.add_argument("--issue", required=True, type=int, help="GitHub issue number")

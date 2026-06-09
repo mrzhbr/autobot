@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -52,6 +54,13 @@ class SupportTests(unittest.TestCase):
         token = "sk-" + ("A" * 40)
 
         findings = find_secret_like_values(f"+OPENAI_API_KEY={token}\n")
+
+        self.assertTrue(findings)
+
+    def test_secret_scanner_flags_raw_openrouter_token(self) -> None:
+        token = "sk-or-v1-" + ("A" * 40)
+
+        findings = find_secret_like_values(f"+OPENROUTER_API_KEY={token}\n")
 
         self.assertTrue(findings)
 
@@ -111,13 +120,23 @@ class SupportTests(unittest.TestCase):
             )
 
             commands = detect_verification_commands(root, None)
+            uv_run = "UV_PROJECT_ENVIRONMENT=.venv .autobot-bootstrap/bin/uv run"
 
-            self.assertEqual(commands.tests, ["python -m pytest"])
+            self.assertEqual(
+                commands.tests,
+                [f"{uv_run} python -m pytest"],
+            )
             self.assertEqual(
                 commands.lint,
-                ["python -m ruff check .", "python -m ruff format --check ."],
+                [
+                    f"{uv_run} ruff check .",
+                    f"{uv_run} ruff format --check .",
+                ],
             )
-            self.assertEqual(commands.types, ["python -m mypy ."])
+            self.assertEqual(
+                commands.types,
+                [f"{uv_run} mypy ."],
+            )
 
     def test_detects_node_verification_commands(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -164,7 +183,7 @@ class SupportTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             result = run_verification(
                 LocalSandbox(Path(tmp)),
-                ["python -c \"print('ghp_' + 'A' * 36)\""],
+                [f"{shlex.quote(sys.executable)} -c \"print('ghp_' + 'A' * 36)\""],
                 False,
             )
 
@@ -175,13 +194,31 @@ class SupportTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             result = run_verification_allow_failure(
                 LocalSandbox(Path(tmp)),
-                ["python -c \"print('ghp_' + 'A' * 36); raise SystemExit(1)\""],
+                [
+                    f"{shlex.quote(sys.executable)} -c "
+                    "\"print('ghp_' + 'A' * 36); raise SystemExit(1)\""
+                ],
                 False,
             )
 
         self.assertEqual(result["ok"], False)
         self.assertNotIn("ghp_" + ("A" * 36), result["output"])
         self.assertIn("[redacted-secret]", result["output"])
+
+    def test_run_verification_error_includes_failed_command(self) -> None:
+        with TemporaryDirectory() as tmp, self.assertRaises(SandboxError) as raised:
+            run_verification(LocalSandbox(Path(tmp)), ["false"], False)
+
+        self.assertIn("$ false", str(raised.exception))
+
+    def test_run_verification_normalizes_python_c_literal_newlines(self) -> None:
+        command = f"{shlex.quote(sys.executable)} -c \"print('one')\\nprint('two')\""
+        with TemporaryDirectory() as tmp:
+            output = run_verification(LocalSandbox(Path(tmp)), [command], False)
+
+        self.assertIn("one", output)
+        self.assertIn("two", output)
+        self.assertIn("print('one')\nprint('two')", output)
 
     def test_verification_rejects_secret_like_commands_before_execution(self) -> None:
         token = "ghp_" + ("A" * 36)
@@ -229,6 +266,24 @@ class SupportTests(unittest.TestCase):
             config = Config.from_env(Path(tmp))
 
         self.assertEqual(config.sandbox_network, "none")
+        self.assertEqual(config.sandbox_backend, "docker-bind")
+
+    def test_config_parses_sandbox_backend(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"SANDBOX_BACKEND": "docker-copy"}, clear=True),
+        ):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.sandbox_backend, "docker-copy")
+
+    def test_config_rejects_unknown_sandbox_backend(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"SANDBOX_BACKEND": "unknown"}, clear=True),
+            self.assertRaisesRegex(ValueError, "SANDBOX_BACKEND must be one of"),
+        ):
+            Config.from_env(Path(tmp))
 
     def test_config_rejects_zero_review_rounds(self) -> None:
         with (
@@ -310,6 +365,82 @@ class SupportTests(unittest.TestCase):
             config = Config.from_env(Path(tmp))
 
         self.assertEqual(config.triage_model, "gpt-4.1")
+
+    def test_config_defaults_implementation_harness_settings(self) -> None:
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", {}, clear=True):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.implement_harness, "legacy")
+        self.assertEqual(config.harness_llm_provider, "openai")
+        self.assertEqual(config.harness_model, "gpt-4.1")
+        self.assertEqual(config.harness_timeout_seconds, 1800)
+        self.assertEqual(config.harness_max_restarts, 1)
+        self.assertFalse(config.planner_enabled)
+        self.assertEqual(config.planner_harness, "pi")
+        self.assertEqual(config.planner_llm_provider, "openai")
+        self.assertEqual(config.planner_model, "gpt-4.1")
+
+    def test_config_parses_planner_settings(self) -> None:
+        env = {
+            "PLANNER_ENABLED": "true",
+            "PLANNER_HARNESS": "pi",
+            "PLANNER_LLM_PROVIDER": "openrouter",
+            "PLANNER_MODEL": "openrouter/anthropic/claude-opus-4.8",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+        self.assertTrue(config.planner_enabled)
+        self.assertEqual(config.planner_harness, "pi")
+        self.assertEqual(config.planner_llm_provider, "openrouter")
+        self.assertEqual(config.planner_model, "openrouter/anthropic/claude-opus-4.8")
+
+    def test_config_rejects_malformed_planner_boolean(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"PLANNER_ENABLED": "sometimes"}, clear=True),
+            self.assertRaisesRegex(ValueError, "PLANNER_ENABLED must be a boolean"),
+        ):
+            Config.from_env(Path(tmp))
+
+    def test_config_rejects_unknown_planner_harness(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"PLANNER_HARNESS": "graph"}, clear=True),
+            self.assertRaisesRegex(ValueError, "PLANNER_HARNESS must be one of"),
+        ):
+            Config.from_env(Path(tmp))
+
+    def test_config_parses_implementation_harness_settings(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "IMPLEMENT_HARNESS": "pi",
+                    "HARNESS_LLM_PROVIDER": "openrouter",
+                    "HARNESS_MODEL": "openrouter/anthropic/claude-sonnet-4",
+                    "HARNESS_TIMEOUT_SECONDS": "120",
+                    "HARNESS_MAX_RESTARTS": "2",
+                },
+                clear=True,
+            ),
+        ):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.implement_harness, "pi")
+        self.assertEqual(config.harness_llm_provider, "openrouter")
+        self.assertEqual(config.harness_model, "openrouter/anthropic/claude-sonnet-4")
+        self.assertEqual(config.harness_timeout_seconds, 120)
+        self.assertEqual(config.harness_max_restarts, 2)
+
+    def test_config_rejects_unknown_implementation_harness(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"IMPLEMENT_HARNESS": "unknown"}, clear=True),
+            self.assertRaisesRegex(ValueError, "IMPLEMENT_HARNESS must be one of"),
+        ):
+            Config.from_env(Path(tmp))
 
 
 if __name__ == "__main__":
