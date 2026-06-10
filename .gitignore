@@ -9,3 +9,9 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Local/internal notes not meant for the public repository.
+CLOUDFLARE_SANDBOX_RESEARCH.md
+DEMO.md
+FINDINGS.md
+GOAL.md
