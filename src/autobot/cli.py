@@ -44,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
             return _doctor(args)
         if args.command == "state":
             return _state(args)
+        if args.command == "eval-harness":
+            return _eval_harness(args)
     except Exception as exc:
         print(f"error: {redact_secret_like_values(str(exc))}", file=sys.stderr)
         return 1
@@ -87,6 +89,21 @@ def _state(args: argparse.Namespace) -> int:
     if args.state_command == "clear":
         return _state_clear(args)
     raise RuntimeError("state subcommand is required")
+
+
+def _eval_harness(args: argparse.Namespace) -> int:
+    from autobot.eval_harness import run_harness_eval
+
+    config = _config(args, require_github=False)
+    result = run_harness_eval(
+        Path.cwd(),
+        args.fixture,
+        args.harness,
+        mock_llm=args.mock_llm,
+        config=config,
+    )
+    print(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+    return 0 if result.score.passed else 1
 
 
 def _state_show(args: argparse.Namespace) -> int:
@@ -324,6 +341,19 @@ def _parser() -> argparse.ArgumentParser:
     clear.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
     clear.add_argument("--issue", required=True, type=int, help="GitHub issue number")
     _common(clear)
+
+    eval_harness = subcommands.add_parser(
+        "eval-harness",
+        help="Run a local implementation harness eval fixture",
+    )
+    eval_harness.add_argument("--fixture", required=True, help="Harness eval fixture name")
+    eval_harness.add_argument(
+        "--harness",
+        required=True,
+        choices=["legacy", "pi"],
+        help="Implementation harness to evaluate",
+    )
+    _common(eval_harness)
     return parser
 
 
