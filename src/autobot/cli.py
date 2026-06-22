@@ -21,6 +21,7 @@ from autobot.config import (
 )
 from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
+from autobot.linear import LinearIssueTracker
 from autobot.llm import build_llm
 from autobot.models import IssueRecord
 from autobot.pipeline import IssueProcessor
@@ -61,7 +62,7 @@ def _run(args: argparse.Namespace) -> int:
 
 def _watch(args: argparse.Namespace) -> int:
     config = _config(args)
-    tracker = GitHubIssueTracker(config.github_token, config.agent_login)
+    tracker = _issue_tracker(config)
     processor = _processor(config, tracker=tracker)
     while True:
         failed = _watch_poll(args.repo, tracker, processor)
@@ -147,11 +148,11 @@ def _latest_learning(record: IssueRecord) -> dict | None:
 
 def _processor(
     config: Config,
-    tracker: GitHubIssueTracker | None = None,
+    tracker=None,
     progress=None,
 ) -> IssueProcessor:
     store = StateStore(config.db_path)
-    tracker = tracker or GitHubIssueTracker(config.github_token, config.agent_login)
+    tracker = tracker or _issue_tracker(config)
     git_host = GitHubGitHost(config.github_token)
     chat = IssueCommentChat(tracker)
     llm = build_llm(config)
@@ -172,7 +173,7 @@ _RUN_PROGRESS_MESSAGES = {
     WorkflowStep.LOAD_RECORD: "loading local state",
     WorkflowStep.TERMINAL_CHECK: "checking terminal state",
     WorkflowStep.BUDGET_GATE: "checking budget",
-    WorkflowStep.READ_ISSUE: "reading GitHub issue",
+    WorkflowStep.READ_ISSUE: "reading issue",
     WorkflowStep.RESUME_WAITING: "checking waiting resume",
     WorkflowStep.GUARDRAIL: "checking guardrails",
     WorkflowStep.PREPARE_WORKSPACE: "preparing workspace",
@@ -252,6 +253,18 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
     return config
 
 
+def _issue_tracker(config: Config):
+    if config.issue_tracker == "github":
+        return GitHubIssueTracker(config.github_token, config.agent_login)
+    if config.issue_tracker == "linear":
+        return LinearIssueTracker(
+            config.linear_api_key,
+            config.linear_agent_login,
+            config.linear_team_key,
+        )
+    raise RuntimeError("ISSUE_TRACKER must be github or linear")
+
+
 def _ensure_live_llm_key(config: Config) -> None:
     if config.dry_run or config.mock_llm:
         return
@@ -296,13 +309,13 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cli")
     subcommands = parser.add_subparsers(dest="command")
 
-    run = subcommands.add_parser("run", help="Process one GitHub issue")
+    run = subcommands.add_parser("run", help="Process one issue")
     run.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
-    run.add_argument("--issue", required=True, type=int, help="GitHub issue number")
+    run.add_argument("--issue", required=True, type=int, help="issue number")
     run.add_argument("--quiet", action="store_true", help="Suppress progress output")
     _common(run)
 
-    watch = subcommands.add_parser("watch", help="Poll for assigned or @-mentioned issues")
+    watch = subcommands.add_parser("watch", help="Poll for assigned or ready issues")
     watch.add_argument("--repo", required=True, help="GitHub repository in owner/name form")
     watch.add_argument("--interval", type=int, default=60, help="Polling interval in seconds")
     watch.add_argument("--once", action="store_true", help="Poll once and exit")
@@ -310,8 +323,8 @@ def _parser() -> argparse.ArgumentParser:
 
     doctor = subcommands.add_parser("doctor", help="Check live-run prerequisites")
     doctor.add_argument("--repo", help="GitHub repository in owner/name form")
-    doctor.add_argument("--issue", type=int, help="GitHub issue number")
-    doctor.add_argument("--no-network", action="store_true", help="Skip GitHub issue readability")
+    doctor.add_argument("--issue", type=int, help="issue number")
+    doctor.add_argument("--no-network", action="store_true", help="Skip issue readability")
     _common(doctor)
 
     state = subcommands.add_parser("state", help="Inspect or modify local issue state")

@@ -277,6 +277,41 @@ class SupportTests(unittest.TestCase):
 
         self.assertEqual(config.sandbox_backend, "docker-copy")
 
+    def test_config_defaults_issue_tracker_to_github(self) -> None:
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", {}, clear=True):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.issue_tracker, "github")
+
+    def test_config_parses_linear_issue_tracker(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict(
+                "os.environ",
+                {
+                    "ISSUE_TRACKER": "linear",
+                    "LINEAR_API_KEY": "lin_api_secret",
+                    "LINEAR_TEAM_KEY": "ENG",
+                    "LINEAR_AGENT_LOGIN": "Autobot Linear",
+                },
+                clear=True,
+            ),
+        ):
+            config = Config.from_env(Path(tmp))
+
+        self.assertEqual(config.issue_tracker, "linear")
+        self.assertEqual(config.linear_api_key, "lin_api_secret")
+        self.assertEqual(config.linear_team_key, "ENG")
+        self.assertEqual(config.linear_agent_login, "Autobot Linear")
+
+    def test_config_rejects_unknown_issue_tracker(self) -> None:
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"ISSUE_TRACKER": "jira"}, clear=True),
+            self.assertRaisesRegex(ValueError, "ISSUE_TRACKER must be one of"),
+        ):
+            Config.from_env(Path(tmp))
+
     def test_config_rejects_unknown_sandbox_backend(self) -> None:
         with (
             TemporaryDirectory() as tmp,
