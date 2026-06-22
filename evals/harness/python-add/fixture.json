@@ -1,0 +1,76 @@
+{
+  "issue": {
+    "title": "Fix calculator add",
+    "body": "The `add` helper should return the arithmetic sum of two numbers. It currently behaves like subtraction.",
+    "comments": [
+      {
+        "author": "maintainer",
+        "body": "Keep the public function name unchanged."
+      }
+    ]
+  },
+  "expectations": {
+    "changed_files": [
+      "app/calculator.py"
+    ],
+    "verification_commands": [
+      "python3 -m unittest discover -s tests"
+    ],
+    "allowed_patterns": [
+      {
+        "path": "app/calculator.py",
+        "pattern": "return left + right"
+      }
+    ],
+    "forbidden_patterns": [
+      {
+        "path": "app/calculator.py",
+        "pattern": "return left - right"
+      }
+    ],
+    "behavioral_assertions": [
+      "add(2, 3) returns 5",
+      "add(-2, 5) returns 3"
+    ]
+  },
+  "mock_runs": {
+    "legacy": {
+      "plan": [
+        "Update the add helper to use addition."
+      ],
+      "changes": [
+        {
+          "path": "app/calculator.py",
+          "content": "def add(left: int, right: int) -> int:\n    return left + right\n"
+        }
+      ],
+      "test_commands": [],
+      "review_rounds": 1,
+      "transcript": [
+        "legacy mock: inspected calculator and changed subtraction to addition"
+      ],
+      "input_tokens": 120,
+      "output_tokens": 40,
+      "dollars": 0.0
+    },
+    "pi": {
+      "plan": [
+        "Patch the calculator helper in place."
+      ],
+      "changes": [
+        {
+          "path": "app/calculator.py",
+          "content": "def add(left: int, right: int) -> int:\n    return left + right\n"
+        }
+      ],
+      "test_commands": [],
+      "review_rounds": 1,
+      "transcript": [
+        "pi mock: edited app/calculator.py and verified unittest target"
+      ],
+      "input_tokens": 110,
+      "output_tokens": 36,
+      "dollars": 0.0
+    }
+  }
+}

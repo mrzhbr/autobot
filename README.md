@@ -189,6 +189,42 @@ Dry-run still reads the GitHub issue, but it writes only under `.autobot/work`, 
 
 Set `GITHUB_TOKEN` for dry-run reads when the public GitHub API rate limit is exhausted.
 
+## Harness Evals
+
+Local harness evals compare implementation harness behavior on repeatable issue
+fixtures without GitHub writes, Docker, Pi subprocesses, or live LLM calls:
+
+```sh
+./cli eval-harness --fixture python-add --harness legacy --mock-llm
+./cli eval-harness --fixture python-add --harness pi --mock-llm
+./cli eval-harness --fixture welcome-copy --harness pi --mock-llm
+```
+
+Fixtures live under `evals/harness/<fixture>/` with a tiny repo template,
+issue text, expected touched files, verification commands, pattern assertions,
+and deterministic mock outputs for `legacy` and `pi`. Results are appended as
+JSONL to `.autobot/evals/harness-results.jsonl`, with per-run workspaces and
+transcripts under `.autobot/evals/work/` and `.autobot/evals/logs/`.
+
+The result schema already records planner, implementer, reviewer, verification,
+cost, wall-time, transcript, and pass/fail scoring fields so future live
+Pi/OpenRouter-backed evals can populate the same JSONL contract.
+
+Provider-backed evals use the same fixture repo and result schema, but call the
+configured harness instead of fixture mock outputs:
+
+```sh
+export LLM_PROVIDER=openrouter
+export OPENROUTER_API_KEY=...
+export IMPLEMENT_HARNESS=legacy
+./cli eval-harness --fixture python-add --harness legacy
+```
+
+`--harness pi` uses the existing Pi RPC path inside Docker, so it also requires
+the Pi sandbox image, provider key passthrough, and sandbox network settings.
+Provider-backed evals never read GitHub issues, post comments, push branches, or
+open PRs; they only write local eval artifacts under `.autobot/evals/`.
+
 Command output includes the per-issue summary required for review:
 
 - branch
