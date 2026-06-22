@@ -11,6 +11,7 @@ from typing import Any
 
 from autobot.diffing import render_untracked_diff
 from autobot.git_safety import is_default_like_branch
+from autobot.http_transport import urlopen
 from autobot.models import Issue, IssueComment
 from autobot.scanner import redact_secret_like_values
 
@@ -149,7 +150,7 @@ class GitHubIssueTracker:
         if self.token:
             request.add_header("Authorization", f"Bearer {self.token}")
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=30) as response:
                 self._last_response_headers = dict(response.headers.items())
                 return json.loads(response.read().decode("utf-8"))
         except TimeoutError as exc:

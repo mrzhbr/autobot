@@ -278,6 +278,31 @@ class CliTests(unittest.TestCase):
         config = build_processor.call_args.args[0]
         self.assertEqual(config.implement_model, "openai/gpt-4.1")
 
+    def test_live_run_accepts_github_app_auth_without_github_token(self) -> None:
+        processor = FakeWatchProcessor()
+        with tempfile.TemporaryDirectory() as tmp:
+            key_path = Path(tmp) / "app.pem"
+            key_path.write_text("placeholder", encoding="utf-8")
+            env = {
+                "GITHUB_APP_ID": "123",
+                "GITHUB_APP_INSTALLATION_ID": "456",
+                "GITHUB_APP_PRIVATE_KEY_PATH": str(key_path),
+                "OPENAI_API_KEY": "x",
+            }
+            with (
+                patch.dict("os.environ", env, clear=True),
+                patch("autobot.cli._ensure_live_prereqs"),
+                patch("autobot.cli._processor", return_value=processor) as build_processor,
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                code = cli.main(["run", "--repo", "owner/repo", "--issue", "1"])
+
+        self.assertEqual(code, 0)
+        self.assertIn('"state": "pr_open"', stdout.getvalue())
+        config = build_processor.call_args.args[0]
+        self.assertIsNone(config.github_token)
+        self.assertEqual(config.github_app_id, "123")
+
     def test_live_run_requires_pi_harness_provider_key_before_processor(self) -> None:
         with (
             patch.dict(

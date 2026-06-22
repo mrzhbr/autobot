@@ -29,6 +29,9 @@ class Config:
     audit_path: Path
     work_root: Path
     github_token: str | None
+    github_app_id: str | None
+    github_app_installation_id: str | None
+    github_app_private_key_path: Path | None
     agent_login: str | None
     llm_provider: str | None
     triage_model: str
@@ -93,6 +96,9 @@ class Config:
             audit_path=Path(audit_default),
             work_root=Path(work_root) if work_root else Path(work_default),
             github_token=os.getenv("GITHUB_TOKEN"),
+            github_app_id=os.getenv("GITHUB_APP_ID"),
+            github_app_installation_id=os.getenv("GITHUB_APP_INSTALLATION_ID"),
+            github_app_private_key_path=_optional_path("GITHUB_APP_PRIVATE_KEY_PATH"),
             agent_login=os.getenv("AGENT_LOGIN") or os.getenv("GITHUB_ACTOR"),
             llm_provider=provider,
             triage_model=triage_model,
@@ -269,6 +275,13 @@ def _optional_nonnegative_int(name: str) -> int | None:
     if parsed < 0:
         raise ValueError(f"{name} must be nonnegative")
     return parsed
+
+
+def _optional_path(name: str) -> Path | None:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    return Path(value).expanduser()
 
 
 def _optional_nonnegative_float(name: str) -> float | None:

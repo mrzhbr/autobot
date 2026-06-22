@@ -31,6 +31,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.12"
 strict = true
 files = [
+  "src/autobot/github_auth.py",
+  "src/autobot/http_transport.py",
   "src/autobot/workflow.py",
   "src/autobot/workflow_models.py",
   "src/autobot/workflow_pauses.py",

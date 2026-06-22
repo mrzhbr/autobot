@@ -17,6 +17,13 @@ from autobot.config import (
     model_providers,
 )
 from autobot.github import GitHubIssueTracker
+from autobot.github_auth import (
+    github_app_credentials,
+    github_auth_requirement_message,
+    has_github_auth,
+    missing_github_app_settings,
+    resolve_github_token,
+)
 from autobot.models import Issue
 from autobot.sandbox import SandboxError, ensure_no_secret_commands
 from autobot.scanner import redact_secret_like_values
@@ -71,6 +78,7 @@ def run_doctor(
         _git_identity_check(config, runner),
         _docker_check(config, runner),
         _github_token_check(config),
+        _github_app_signing_check(config, runner),
         _agent_login_check(config),
         _llm_key_check(config),
         _model_check("triage model", config.triage_model),
@@ -158,7 +166,38 @@ def _github_token_check(config: Config) -> CheckResult:
         return CheckResult("github token", "skip", "dry-run does not need GITHUB_TOKEN")
     if config.github_token:
         return CheckResult("github token", "pass", "GITHUB_TOKEN is set")
-    return CheckResult("github token", "fail", "GITHUB_TOKEN is required for live runs")
+    missing = missing_github_app_settings(config)
+    if missing:
+        return CheckResult(
+            "github token", "fail", "GitHub App auth is missing: " + ", ".join(missing)
+        )
+    credentials = github_app_credentials(config)
+    if credentials:
+        if not credentials.private_key_path.is_file():
+            return CheckResult(
+                "github token",
+                "fail",
+                f"GITHUB_APP_PRIVATE_KEY_PATH does not exist: {credentials.private_key_path}",
+            )
+        return CheckResult("github token", "pass", "GitHub App credentials are set")
+    return CheckResult("github token", "fail", github_auth_requirement_message(config))
+
+
+def _github_app_signing_check(config: Config, command_runner: CommandRunner) -> CheckResult:
+    if config.dry_run:
+        return CheckResult("github app signing", "skip", "dry-run does not need app signing")
+    if config.github_token:
+        return CheckResult("github app signing", "skip", "GITHUB_TOKEN is set")
+    credentials = github_app_credentials(config)
+    if not credentials:
+        return CheckResult("github app signing", "skip", "GitHub App credentials are not complete")
+    if not credentials.private_key_path.is_file():
+        return CheckResult(
+            "github app signing",
+            "skip",
+            "GITHUB_APP_PRIVATE_KEY_PATH must exist before signing can be checked",
+        )
+    return _command_check("github app signing", ["openssl", "version"], command_runner)
 
 
 def _agent_login_check(config: Config) -> CheckResult:
@@ -425,10 +464,11 @@ def _issue_check(
         return CheckResult("issue readable", "skip", "provide --repo and --issue to check GitHub")
     if not network:
         return CheckResult("issue readable", "skip", "network check disabled")
-    if not config.github_token and not config.dry_run:
-        return CheckResult("issue readable", "skip", "GITHUB_TOKEN missing")
+    if not has_github_auth(config) and not config.dry_run:
+        return CheckResult("issue readable", "skip", github_auth_requirement_message(config))
     try:
-        issue_data = tracker_factory(config.github_token, config.agent_login).get(repo, issue)
+        token = resolve_github_token(config)
+        issue_data = tracker_factory(token, config.agent_login).get(repo, issue)
     except Exception as exc:
         return CheckResult("issue readable", "fail", redact_secret_like_values(str(exc)))
     return CheckResult("issue readable", "pass", f"{issue_data.repo}#{issue_data.number}")

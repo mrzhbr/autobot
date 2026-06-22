@@ -55,6 +55,12 @@ def pi_missing_command(command, capture_output, text, check, timeout):
     return passing_command(command, capture_output, text, check, timeout)
 
 
+def openssl_missing_command(command, capture_output, text, check, timeout):
+    if command[:2] == ["openssl", "version"]:
+        raise OSError("openssl missing")
+    return passing_command(command, capture_output, text, check, timeout)
+
+
 class RecordingCommandRunner:
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
@@ -110,6 +116,56 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["llm key"].status, "skip")
             self.assertEqual(by_name["sandbox network"].status, "skip")
             self.assertEqual(by_name["issue readable"].status, "skip")
+
+    def test_live_doctor_accepts_github_app_credentials(self) -> None:
+        with TemporaryDirectory() as tmp:
+            key_path = Path(tmp) / "app.pem"
+            key_path.write_text("placeholder", encoding="utf-8")
+            env = {
+                "GITHUB_APP_ID": "123",
+                "GITHUB_APP_INSTALLATION_ID": "456",
+                "GITHUB_APP_PRIVATE_KEY_PATH": str(key_path),
+                "OPENAI_API_KEY": "x",
+            }
+            with patch.dict("os.environ", env, clear=True):
+                config = Config.from_env(Path(tmp))
+
+                checks = run_doctor(config, command_runner=passing_command, network=False)
+
+        by_name = {check.name: check for check in checks}
+        self.assertEqual(by_name["github token"].status, "pass")
+        self.assertEqual(by_name["github token"].message, "GitHub App credentials are set")
+        self.assertEqual(by_name["github app signing"].status, "pass")
+
+    def test_live_doctor_fails_when_github_app_signing_is_unavailable(self) -> None:
+        with TemporaryDirectory() as tmp:
+            key_path = Path(tmp) / "app.pem"
+            key_path.write_text("placeholder", encoding="utf-8")
+            env = {
+                "GITHUB_APP_ID": "123",
+                "GITHUB_APP_INSTALLATION_ID": "456",
+                "GITHUB_APP_PRIVATE_KEY_PATH": str(key_path),
+                "OPENAI_API_KEY": "x",
+            }
+            with patch.dict("os.environ", env, clear=True):
+                config = Config.from_env(Path(tmp))
+
+                checks = run_doctor(config, command_runner=openssl_missing_command, network=False)
+
+        by_name = {check.name: check for check in checks}
+        self.assertEqual(by_name["github app signing"].status, "fail")
+        self.assertIn("openssl missing", by_name["github app signing"].message)
+
+    def test_live_doctor_reports_partial_github_app_credentials(self) -> None:
+        env = {"GITHUB_APP_ID": "123", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+        by_name = {check.name: check for check in checks}
+        self.assertEqual(by_name["github token"].status, "fail")
+        self.assertIn("GITHUB_APP_INSTALLATION_ID", by_name["github token"].message)
 
     def test_live_doctor_fails_when_git_identity_is_missing(self) -> None:
         env = {"GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}

@@ -26,7 +26,6 @@ python -m pip install -e ".[dev]"
 For a live GitHub run:
 
 ```sh
-export GITHUB_TOKEN=ghp_...
 export AGENT_LOGIN=your-bot-login
 export OPENAI_API_KEY=sk-...
 export LLM_PROVIDER=openai
@@ -34,6 +33,20 @@ export TRIAGE_MODEL=gpt-4.1
 export IMPLEMENT_MODEL=gpt-4.1
 export REVIEW_MODEL=gpt-4.1
 export REVIEW_MODELS=gpt-4.1
+```
+
+Configure GitHub auth with either a token or a GitHub App installation. `GITHUB_TOKEN`
+takes precedence when it is set.
+
+```sh
+# Option A: PAT or fine-grained token
+export GITHUB_TOKEN=ghp_...
+
+# Option B: GitHub App installation auth
+export GITHUB_APP_ID=123456
+export GITHUB_APP_INSTALLATION_ID=98765432
+export GITHUB_APP_PRIVATE_KEY_PATH=/absolute/path/to/private-key.pem
+export AGENT_LOGIN='your-app-slug[bot]'
 ```
 
 `LLM_PROVIDER` may be unset, `openai`, `anthropic`, or `openrouter`; any other value fails preflight before processing an issue.
@@ -187,7 +200,7 @@ Run a local dry-run against a public issue body:
 
 Dry-run still reads the GitHub issue, but it writes only under `.autobot/work`, uses a generated local git repo, skips Docker, skips outward comments and labels, and returns `dry-run://draft-pr`.
 
-Set `GITHUB_TOKEN` for dry-run reads when the public GitHub API rate limit is exhausted.
+Set `GITHUB_TOKEN` or GitHub App credentials for dry-run reads when the public GitHub API rate limit is exhausted.
 
 Command output includes the per-issue summary required for review:
 

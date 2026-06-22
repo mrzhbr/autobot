@@ -21,6 +21,11 @@ from autobot.config import (
 )
 from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
+from autobot.github_auth import (
+    github_auth_requirement_message,
+    has_github_auth,
+    resolve_github_token,
+)
 from autobot.llm import build_llm
 from autobot.models import IssueRecord
 from autobot.pipeline import IssueProcessor
@@ -61,7 +66,8 @@ def _run(args: argparse.Namespace) -> int:
 
 def _watch(args: argparse.Namespace) -> int:
     config = _config(args)
-    tracker = GitHubIssueTracker(config.github_token, config.agent_login)
+    github_token = resolve_github_token(config)
+    tracker = GitHubIssueTracker(github_token, config.agent_login)
     processor = _processor(config, tracker=tracker)
     while True:
         failed = _watch_poll(args.repo, tracker, processor)
@@ -151,8 +157,9 @@ def _processor(
     progress=None,
 ) -> IssueProcessor:
     store = StateStore(config.db_path)
-    tracker = tracker or GitHubIssueTracker(config.github_token, config.agent_login)
-    git_host = GitHubGitHost(config.github_token)
+    github_token = resolve_github_token(config)
+    tracker = tracker or GitHubIssueTracker(github_token, config.agent_login)
+    git_host = GitHubGitHost(github_token)
     chat = IssueCommentChat(tracker)
     llm = build_llm(config)
     audit = AuditLog(config.audit_path)
@@ -244,8 +251,8 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
         dry_run=args.dry_run,
         mock_llm=args.mock_llm,
     )
-    if require_github and not config.github_token and not config.dry_run:
-        raise RuntimeError("GITHUB_TOKEN is required for live runs")
+    if require_github and not config.dry_run and not has_github_auth(config):
+        raise RuntimeError(github_auth_requirement_message(config))
     if require_github:
         _ensure_live_llm_key(config)
         _ensure_live_prereqs(config)

@@ -1,5 +1,6 @@
 .DS_Store
 .env
+*.private-key.pem
 .autobot/
 .venv/
 __pycache__/
