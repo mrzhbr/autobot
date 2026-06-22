@@ -386,7 +386,7 @@ class GitHubSafetyTests(unittest.TestCase):
         tracker = GitHubIssueTracker(token, "bot")
 
         with (
-            patch("autobot.github.urllib.request.urlopen", side_effect=error),
+            patch("autobot.http_transport.urllib.request.urlopen", side_effect=error),
             self.assertRaises(GitHubError) as raised,
         ):
             tracker.get("owner/repo", 1)
@@ -400,7 +400,7 @@ class GitHubSafetyTests(unittest.TestCase):
         tracker = GitHubIssueTracker(token, "bot")
 
         with (
-            patch("autobot.github.urllib.request.urlopen", side_effect=error),
+            patch("autobot.http_transport.urllib.request.urlopen", side_effect=error),
             self.assertRaises(GitHubError) as raised,
         ):
             tracker.get("owner/repo", 1)
@@ -413,7 +413,7 @@ class GitHubSafetyTests(unittest.TestCase):
         tracker = GitHubIssueTracker("token", "bot")
 
         with (
-            patch("autobot.github.urllib.request.urlopen", side_effect=TimeoutError),
+            patch("autobot.http_transport.urllib.request.urlopen", side_effect=TimeoutError),
             self.assertRaises(GitHubError) as raised,
         ):
             tracker.get("owner/repo", 1)
@@ -698,7 +698,7 @@ class GitHubSafetyTests(unittest.TestCase):
         tracker = GitHubIssueTracker("token", "bot")
 
         with patch(
-            "autobot.github.urllib.request.urlopen", return_value=FakeHTTPResponse()
+            "autobot.http_transport.urllib.request.urlopen", return_value=FakeHTTPResponse()
         ) as open_url:
             tracker._request("POST", "/repos/owner/repo/issues/7/labels", {"labels": [token]})
 

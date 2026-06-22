@@ -21,6 +21,11 @@ from autobot.config import (
 )
 from autobot.doctor import doctor_ok, run_doctor
 from autobot.github import GitHubGitHost, GitHubIssueTracker
+from autobot.github_auth import (
+    github_auth_requirement_message,
+    has_github_auth,
+    resolve_github_token,
+)
 from autobot.linear import LinearIssueTracker
 from autobot.llm import build_llm
 from autobot.models import IssueRecord
@@ -170,7 +175,7 @@ def _processor(
 ) -> IssueProcessor:
     store = StateStore(config.db_path)
     tracker = tracker or _issue_tracker(config)
-    git_host = GitHubGitHost(config.github_token)
+    git_host = GitHubGitHost(resolve_github_token(config))
     chat = IssueCommentChat(tracker)
     llm = build_llm(config)
     audit = AuditLog(config.audit_path)
@@ -262,8 +267,8 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
         dry_run=args.dry_run,
         mock_llm=args.mock_llm,
     )
-    if require_github and not config.github_token and not config.dry_run:
-        raise RuntimeError("GITHUB_TOKEN is required for live runs")
+    if require_github and not config.dry_run and not has_github_auth(config):
+        raise RuntimeError(github_auth_requirement_message(config))
     if require_github:
         _ensure_live_llm_key(config)
         _ensure_live_prereqs(config)
@@ -272,7 +277,7 @@ def _config(args: argparse.Namespace, require_github: bool = True) -> Config:
 
 def _issue_tracker(config: Config):
     if config.issue_tracker == "github":
-        return GitHubIssueTracker(config.github_token, config.agent_login)
+        return GitHubIssueTracker(resolve_github_token(config), config.agent_login)
     if config.issue_tracker == "linear":
         return LinearIssueTracker(
             config.linear_api_key,
