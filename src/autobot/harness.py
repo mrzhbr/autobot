@@ -65,6 +65,7 @@ class HarnessResult:
 
 @dataclass(frozen=True)
 class PlanningResult:
+    contract_version: int
     summary: str
     target_files: list[str]
     constraints: list[str]
@@ -78,6 +79,7 @@ class PlanningResult:
 
     def model_dump(self) -> dict[str, object]:
         return {
+            "contract_version": self.contract_version,
             "summary": self.summary,
             "target_files": self.target_files,
             "constraints": self.constraints,
@@ -92,6 +94,7 @@ class PlanningResult:
     def as_prompt_context(self) -> str:
         return "\n".join(
             [
+                f"Planner contract version: {self.contract_version}",
                 f"Summary: {self.summary}",
                 _section("Target files", self.target_files),
                 _section("Constraints", self.constraints),
@@ -144,6 +147,7 @@ class LegacyLLMHarnessSession:
 
     def plan(self, task: HarnessTask) -> PlanningResult:
         return PlanningResult(
+            contract_version=1,
             summary="Planner disabled for legacy dry-run harness.",
             target_files=[item.path for item in task.context],
             constraints=["Keep changes scoped to the issue."],

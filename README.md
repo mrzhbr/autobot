@@ -126,6 +126,12 @@ export PLANNER_LLM_PROVIDER=openrouter
 export PLANNER_MODEL=openrouter/anthropic/claude-opus-4.8
 ```
 
+The planner must return planner contract version 1 as strict JSON:
+`contract_version`, `summary`, `target_files`, `constraints`,
+`implementation_steps`, `tests_to_add`, `verification_commands`, `risks`, and
+`non_goals`. Autobot validates the contract before persisting it or passing it to
+downstream agents.
+
 `IMPLEMENT_HARNESS=openhands` is accepted by config but intentionally fails
 preflight until the OpenHands baseline adapter is wired.
 

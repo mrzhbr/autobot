@@ -16,10 +16,11 @@ from autobot.harness import (
     HarnessResult,
     HarnessSession,
     HarnessTask,
-    HarnessTaskKind,
     PlanningResult,
 )
 from autobot.models import Usage
+from autobot.pi_prompts import planner_prompt as _planner_prompt
+from autobot.pi_prompts import task_prompt as _task_prompt
 from autobot.sandbox import DockerSandbox
 from autobot.scanner import redact_secret_like_values
 
@@ -111,17 +112,18 @@ class PiHarnessSession:
         self._wait_for_response(prompt_id, transcript)
         self._wait_for_agent_end(transcript)
         text = self._last_assistant_text(transcript)
-        payload = _parse_json_object(text or "{}")
+        payload = _validate_planner_payload(_parse_json_object(text or "{}"))
         transcript_path = self._write_transcript(task, transcript, text)
         return PlanningResult(
-            summary=_string(payload.get("summary")),
-            target_files=_string_list(payload.get("target_files")),
-            constraints=_string_list(payload.get("constraints")),
-            implementation_steps=_string_list(payload.get("implementation_steps")),
-            tests_to_add=_string_list(payload.get("tests_to_add")),
-            verification_commands=_string_list(payload.get("verification_commands")),
-            risks=_string_list(payload.get("risks")),
-            non_goals=_string_list(payload.get("non_goals")),
+            contract_version=payload.contract_version,
+            summary=payload.summary,
+            target_files=payload.target_files,
+            constraints=payload.constraints,
+            implementation_steps=payload.implementation_steps,
+            tests_to_add=payload.tests_to_add,
+            verification_commands=payload.verification_commands,
+            risks=payload.risks,
+            non_goals=payload.non_goals,
             usage=self._usage_since_last(task.kind.value, transcript),
             transcript_path=str(transcript_path),
         )
@@ -298,46 +300,6 @@ def _provider_model(provider: str, model: str) -> str:
     return model
 
 
-def _task_prompt(task: HarnessTask) -> str:
-    feedback = "\n".join(task.review_findings) or "None"
-    feedback_label = "Fix feedback"
-    if task.kind == HarnessTaskKind.REVIEW_FIX:
-        feedback_label = "Blocking reviewer findings"
-    elif task.kind == HarnessTaskKind.VERIFICATION_FIX:
-        feedback_label = "Verification failure output"
-    context = "\n\n".join(f"## {item.path}\n{item.content}" for item in task.context)
-    planner = task.planning_context or "None"
-    return (
-        "You are Autobot's implementation harness. Modify files directly in this repository. "
-        "Keep changes scoped to the issue. Run only necessary local inspection commands. "
-        "Do not create commits, branches, pull requests, comments, or network calls except "
-        "LLM calls. "
-        "When finished, respond with one JSON object and no extra prose: "
-        '{"plan":["..."],"test_commands":["..."],"changed_paths":["..."]}.\n\n'
-        f"Task kind: {task.kind.value}\n"
-        f"Issue #{task.issue.number}: {task.issue.title}\n\n{task.issue.body}\n\n"
-        f"Planner output:\n{planner}\n\n"
-        f"{feedback_label}:\n{feedback}\n\n"
-        f"Repo context:\n{context or 'No focused context gathered.'}"
-    )
-
-
-def _planner_prompt(task: HarnessTask) -> str:
-    context = "\n\n".join(f"## {item.path}\n{item.content}" for item in task.context)
-    return (
-        "You are Autobot's read-only planning agent. Inspect the repository freely using "
-        "read-only tools and shell commands that do not modify files. Do not edit files, "
-        "create commits, push branches, open pull requests, or leave generated artifacts. "
-        "Your job is to produce an implementation strategy for a cheaper implementer. "
-        "Return one JSON object and no prose with keys: summary string, target_files array "
-        "of strings, constraints array of strings, implementation_steps array of strings, "
-        "tests_to_add array of strings, verification_commands array of strings, risks array "
-        "of strings, non_goals array of strings.\n\n"
-        f"Issue #{task.issue.number}: {task.issue.title}\n\n{task.issue.body}\n\n"
-        f"Initial repo context:\n{context or 'No focused context gathered. Inspect the repo.'}"
-    )
-
-
 def _git_status_paths(repo_dir: Path) -> set[str]:
     result = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"],
@@ -378,14 +340,21 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _validate_planner_payload(payload: dict[str, Any]):
+    from pydantic import ValidationError
+
+    from autobot.schemas import PlannerPayload
+
+    try:
+        return PlannerPayload.model_validate(payload)
+    except ValidationError as exc:
+        raise HarnessError("Pi planner returned invalid contract: " + str(exc)) from exc
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str) and item.strip()]
-
-
-def _string(value: Any) -> str:
-    return value.strip() if isinstance(value, str) else ""
 
 
 def _request_id(prefix: str) -> str:
