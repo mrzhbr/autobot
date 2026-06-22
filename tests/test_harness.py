@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from autobot.config import Config
 from autobot.harness import (
+    HarnessError,
     HarnessResult,
     HarnessTask,
     HarnessTaskKind,
@@ -300,6 +301,7 @@ class HarnessTests(unittest.TestCase):
                 "data": {
                     "text": json.dumps(
                         {
+                            "contract_version": 1,
                             "summary": "Patch router confidence handling.",
                             "target_files": ["src/router.py", "tests/test_router.py"],
                             "constraints": ["Keep public API stable."],
@@ -339,6 +341,7 @@ class HarnessTests(unittest.TestCase):
             )
 
         self.assertEqual(result.summary, "Patch router confidence handling.")
+        self.assertEqual(result.contract_version, 1)
         self.assertEqual(result.target_files, ["src/router.py", "tests/test_router.py"])
         self.assertEqual(result.implementation_steps, ["Read RouterResult.", "Add fallback."])
         self.assertEqual(
@@ -347,6 +350,32 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertIsNotNone(result.transcript_path)
         self.assertIn("pi-planning-", Path(result.transcript_path).name)
+
+    def test_pi_session_rejects_invalid_planner_contract(self) -> None:
+        lines = [
+            {"id": "prompt-1", "type": "response", "success": True},
+            {"type": "agent_start"},
+            {"type": "agent_end", "messages": []},
+            {
+                "id": "last-1",
+                "type": "response",
+                "success": True,
+                "data": {"text": json.dumps({"summary": "No steps."})},
+            },
+        ]
+        with (
+            TemporaryDirectory() as tmp,
+            patch.dict("os.environ", {"HARNESS_TIMEOUT_SECONDS": "5"}, clear=True),
+            patch("autobot.pi_harness._request_id", side_effect=["prompt-1", "last-1"]),
+        ):
+            repo = Path(tmp)
+            config = Config.from_env(repo)
+            session = PiHarnessSession(config, repo, FakeProcess(lines), repo / "harness")
+
+            with self.assertRaises(HarnessError) as raised:
+                session.plan(HarnessTask(HarnessTaskKind.PLANNING, _issue(), []))
+
+        self.assertIn("invalid contract", str(raised.exception))
 
     def test_pi_verification_fix_uses_distinct_role_and_transcript_name(self) -> None:
         lines = [
@@ -439,6 +468,7 @@ class HarnessTests(unittest.TestCase):
         self.assertIn("read-only planning agent", prompt)
         self.assertIn("Do not edit files", prompt)
         self.assertIn("Return one JSON object", prompt)
+        self.assertIn("contract_version number set to 1", prompt)
 
     def test_pi_container_env_names_passes_only_selected_provider_key(self) -> None:
         with (
