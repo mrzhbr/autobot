@@ -4,7 +4,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from autobot.schemas import ImplementationPayload, ReviewPayload, TriagePayload
+from autobot.schemas import ImplementationPayload, PlannerPayload, ReviewPayload, TriagePayload
 
 
 class SchemaTests(unittest.TestCase):
@@ -83,6 +83,60 @@ class SchemaTests(unittest.TestCase):
 
         self.assertNotIn(token, str(raised.exception))
         self.assertIn("secret-like values found in test commands", str(raised.exception))
+
+    def test_planner_contract_requires_version(self) -> None:
+        with self.assertRaises(ValidationError) as raised:
+            PlannerPayload.model_validate(
+                {
+                    "summary": "Patch router confidence handling.",
+                    "target_files": ["src/router.py"],
+                    "constraints": [],
+                    "implementation_steps": ["  "],
+                    "tests_to_add": [],
+                    "verification_commands": [],
+                    "risks": [],
+                    "non_goals": [],
+                }
+            )
+
+        self.assertIn("contract_version", str(raised.exception))
+
+    def test_planner_contract_requires_actionable_steps(self) -> None:
+        with self.assertRaises(ValidationError) as raised:
+            PlannerPayload.model_validate(
+                {
+                    "contract_version": 1,
+                    "summary": "Patch router confidence handling.",
+                    "target_files": ["src/router.py"],
+                    "constraints": [],
+                    "implementation_steps": ["  "],
+                    "tests_to_add": [],
+                    "verification_commands": [],
+                    "risks": [],
+                    "non_goals": [],
+                }
+            )
+
+        self.assertIn("planner contract must include", str(raised.exception))
+
+    def test_planner_contract_trims_fields(self) -> None:
+        payload = PlannerPayload.model_validate(
+            {
+                "contract_version": 1,
+                "summary": " Patch router confidence handling. ",
+                "target_files": [" src/router.py ", ""],
+                "constraints": [" Keep public API stable. "],
+                "implementation_steps": [" Read RouterResult. "],
+                "tests_to_add": [" Low-confidence route test. "],
+                "verification_commands": [" python -m pytest tests/test_router.py "],
+                "risks": [" Ambiguous router names. "],
+                "non_goals": [" No model provider changes. "],
+            }
+        )
+
+        self.assertEqual(payload.summary, "Patch router confidence handling.")
+        self.assertEqual(payload.target_files, ["src/router.py"])
+        self.assertEqual(payload.implementation_steps, ["Read RouterResult."])
 
     def test_review_payload_accepts_empty_findings(self) -> None:
         payload = ReviewPayload.model_validate({"findings": []})

@@ -101,6 +101,7 @@ class DoctorTests(unittest.TestCase):
             by_name = {check.name: check for check in checks}
             self.assertEqual(by_name["github token"].status, "fail")
             self.assertEqual(by_name["llm key"].status, "fail")
+            self.assertEqual(by_name["issue tracker"].status, "pass")
 
     def test_dry_run_doctor_skips_live_credentials(self) -> None:
         with TemporaryDirectory() as tmp, patch.dict("os.environ", {}, clear=True):
@@ -616,6 +617,79 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(by_name["issue readable"].status, "fail")
             self.assertNotIn(token, by_name["issue readable"].message)
             self.assertIn("[redacted-secret]", by_name["issue readable"].message)
+
+    def test_linear_doctor_requires_linear_api_key(self) -> None:
+        env = {"ISSUE_TRACKER": "linear", "GITHUB_TOKEN": "x", "OPENAI_API_KEY": "x"}
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["github token"].status, "pass")
+            self.assertEqual(by_name["issue tracker"].status, "fail")
+            self.assertEqual(by_name["issue tracker"].message, "LINEAR_API_KEY is required")
+
+    def test_linear_doctor_reports_configured_team(self) -> None:
+        env = {
+            "ISSUE_TRACKER": "linear",
+            "GITHUB_TOKEN": "x",
+            "LINEAR_API_KEY": "lin_api_secret",
+            "LINEAR_TEAM_KEY": "ENG",
+            "OPENAI_API_KEY": "x",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertTrue(doctor_ok(checks))
+            self.assertEqual(by_name["issue tracker"].status, "pass")
+            self.assertEqual(by_name["issue tracker"].message, "linear team ENG")
+
+    def test_linear_doctor_requires_team_key(self) -> None:
+        env = {
+            "ISSUE_TRACKER": "linear",
+            "GITHUB_TOKEN": "x",
+            "LINEAR_API_KEY": "lin_api_secret",
+            "OPENAI_API_KEY": "x",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp))
+
+            checks = run_doctor(config, command_runner=passing_command, network=False)
+
+            by_name = {check.name: check for check in checks}
+            self.assertFalse(doctor_ok(checks))
+            self.assertEqual(by_name["issue tracker"].status, "fail")
+            self.assertEqual(by_name["issue tracker"].message, "LINEAR_TEAM_KEY is required")
+
+    def test_linear_issue_readability_uses_linear_tracker(self) -> None:
+        env = {
+            "ISSUE_TRACKER": "linear",
+            "LINEAR_API_KEY": "lin_api_secret",
+            "LINEAR_TEAM_KEY": "ENG",
+        }
+        with TemporaryDirectory() as tmp, patch.dict("os.environ", env, clear=True):
+            config = Config.from_env(Path(tmp), dry_run=True, mock_llm=True)
+
+            with patch("autobot.doctor.LinearIssueTracker") as tracker:
+                tracker.return_value.get.return_value = Issue(
+                    "owner/repo", 7, "Title", "Body", "alice", []
+                )
+                checks = run_doctor(
+                    config,
+                    repo="owner/repo",
+                    issue=7,
+                    command_runner=passing_command,
+                )
+
+            tracker.assert_called_once_with("lin_api_secret", config.linear_agent_login, "ENG")
+            by_name = {check.name: check for check in checks}
+            self.assertEqual(by_name["issue readable"].status, "pass")
+            self.assertEqual(by_name["issue readable"].message, "owner/repo#7")
 
 
 if __name__ == "__main__":

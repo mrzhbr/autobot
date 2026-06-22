@@ -445,6 +445,40 @@ class CliTests(unittest.TestCase):
             all(line["verification_commands"] == ["python -m pytest"] for line in lines)
         )
 
+    def test_watch_uses_linear_tracker_when_configured(self) -> None:
+        tracker = FakeWatchTracker([123])
+        processor = FakeWatchProcessor()
+        env = {
+            "ISSUE_TRACKER": "linear",
+            "LINEAR_API_KEY": "lin_api_secret",
+            "LINEAR_TEAM_KEY": "ENG",
+            "LINEAR_AGENT_LOGIN": "Autobot Linear",
+        }
+
+        with (
+            patch.dict("os.environ", env, clear=True),
+            patch("autobot.cli.LinearIssueTracker", return_value=tracker) as linear_tracker,
+            patch("autobot.cli.GitHubIssueTracker") as github_tracker,
+            patch("autobot.cli._processor", return_value=processor),
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            code = cli.main(
+                [
+                    "watch",
+                    "--repo",
+                    "owner/repo",
+                    "--once",
+                    "--dry-run",
+                    "--mock-llm",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        linear_tracker.assert_called_once_with("lin_api_secret", "Autobot Linear", "ENG")
+        github_tracker.assert_not_called()
+        self.assertEqual(processor.calls, [("owner/repo", 123)])
+        self.assertEqual(json.loads(stdout.getvalue())["issue"], 123)
+
     def test_watch_once_continues_after_issue_failure(self) -> None:
         token = "ghp_" + ("A" * 36)
         tracker = FakeWatchTracker([2, 3])

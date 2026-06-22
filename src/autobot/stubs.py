@@ -1,29 +1,7 @@
 from __future__ import annotations
 
+from autobot.linear import LinearIssueTracker as LinearIssueTracker
 from autobot.models import Issue
-
-
-class LinearIssueTracker:
-    """Documented stub for a future Linear IssueTracker adapter.
-
-    Expected mapping:
-    - `list_actionable` searches assigned or mentioned Linear issues.
-    - `get` returns title, description, labels, comments, and author.
-    - `comment` creates a Linear comment.
-    - `set_label` applies workflow/state labels such as `agent-waiting`.
-    """
-
-    def list_actionable(self, repo: str) -> list[int]:
-        raise NotImplementedError("Linear adapter is a documented stub for this prototype")
-
-    def get(self, repo: str, issue_number: int) -> Issue:
-        raise NotImplementedError("Linear adapter is a documented stub for this prototype")
-
-    def comment(self, repo: str, issue_number: int, text: str) -> int:
-        raise NotImplementedError("Linear adapter is a documented stub for this prototype")
-
-    def set_label(self, repo: str, issue_number: int, label: str) -> None:
-        raise NotImplementedError("Linear adapter is a documented stub for this prototype")
 
 
 class JiraIssueTracker:

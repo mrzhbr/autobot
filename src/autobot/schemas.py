@@ -68,6 +68,42 @@ class ImplementationPayload(StrictPayload):
         return self
 
 
+class PlannerPayload(StrictPayload):
+    contract_version: Literal[1]
+    summary: str = Field(min_length=1)
+    target_files: list[str]
+    constraints: list[str]
+    implementation_steps: list[str] = Field(min_length=1)
+    tests_to_add: list[str]
+    verification_commands: list[str]
+    risks: list[str]
+    non_goals: list[str]
+
+    @field_validator(
+        "target_files",
+        "constraints",
+        "implementation_steps",
+        "tests_to_add",
+        "verification_commands",
+        "risks",
+        "non_goals",
+    )
+    @classmethod
+    def strip_strings(cls, values: list[str]) -> list[str]:
+        return [value.strip() for value in values if value.strip()]
+
+    @field_validator("summary")
+    @classmethod
+    def strip_summary(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def require_actionable_steps(self) -> PlannerPayload:
+        if not self.implementation_steps:
+            raise ValueError("planner contract must include at least one implementation step")
+        return self
+
+
 class ReviewFindingPayload(StrictPayload):
     severity: Literal["info", "low", "medium", "high", "critical"]
     file: str

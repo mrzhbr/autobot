@@ -20,6 +20,7 @@ PRICE_DIRECTIONS = ("INPUT", "OUTPUT")
 IMPLEMENT_HARNESSES = ("legacy", "pi", "openhands")
 PLANNER_HARNESSES = ("pi",)
 SANDBOX_BACKENDS = ("docker-bind", "docker-copy")
+ISSUE_TRACKERS = ("github", "linear")
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,10 @@ class Config:
     planner_model: str
     dry_run: bool = False
     mock_llm: bool = False
+    issue_tracker: str = "github"
+    linear_api_key: str | None = None
+    linear_team_key: str | None = None
+    linear_agent_login: str | None = None
 
     @classmethod
     def from_env(
@@ -125,6 +130,12 @@ class Config:
             planner_model=planner_model,
             dry_run=dry_run,
             mock_llm=mock_llm or os.getenv("AUTOBOT_MOCK_LLM") == "1",
+            issue_tracker=_issue_tracker(),
+            linear_api_key=os.getenv("LINEAR_API_KEY"),
+            linear_team_key=os.getenv("LINEAR_TEAM_KEY"),
+            linear_agent_login=os.getenv("LINEAR_AGENT_LOGIN")
+            or os.getenv("AGENT_LOGIN")
+            or os.getenv("GITHUB_ACTOR"),
         )
 
 
@@ -246,6 +257,14 @@ def _sandbox_backend() -> str:
     if value not in SANDBOX_BACKENDS:
         joined = ", ".join(SANDBOX_BACKENDS)
         raise ValueError(f"SANDBOX_BACKEND must be one of: {joined}")
+    return value
+
+
+def _issue_tracker() -> str:
+    value = os.getenv("ISSUE_TRACKER", "github").strip().lower()
+    if value not in ISSUE_TRACKERS:
+        joined = ", ".join(ISSUE_TRACKERS)
+        raise ValueError(f"ISSUE_TRACKER must be one of: {joined}")
     return value
 
 

@@ -11,6 +11,7 @@ The implementation is intentionally thin but end-to-end:
 - Pydantic validates structured LLM output before the pipeline acts on it.
 - The issue lifecycle runs through an explicit typed step workflow with scoped mypy coverage.
 - Live runs use GitHub Issues, GitHub PRs, Docker, and an OpenAI, Anthropic, or OpenRouter LLM path.
+- `ISSUE_TRACKER=linear` can swap issue reads/comments/labels to Linear while PRs still open on GitHub.
 - `--dry-run --mock-llm` exercises the state machine without comments, pushes, PRs, Docker, or LLM calls.
 
 ## Setup
@@ -48,6 +49,22 @@ export GITHUB_APP_INSTALLATION_ID=98765432
 export GITHUB_APP_PRIVATE_KEY_PATH=/absolute/path/to/private-key.pem
 export AGENT_LOGIN='your-app-slug[bot]'
 ```
+
+For Linear issues with GitHub PRs:
+
+```sh
+export ISSUE_TRACKER=linear
+export LINEAR_API_KEY=lin_api_...
+export LINEAR_TEAM_KEY=ENG
+export LINEAR_AGENT_LOGIN="Autobot"
+export GITHUB_TOKEN=ghp_...
+export OPENAI_API_KEY=sk-...
+```
+
+`--repo` remains the GitHub repository used for clone, push, CI, and draft PRs.
+`LINEAR_TEAM_KEY` supplies the Linear issue namespace: `--issue 123` maps to
+Linear issue `ENG-123`. Linear comments, labels, and resume checks use that
+mapped issue; GitHub remains the Git host.
 
 `LLM_PROVIDER` may be unset, `openai`, `anthropic`, or `openrouter`; any other value fails preflight before processing an issue.
 When `MODEL` is unset, the default model follows the inferred provider: OpenAI uses `gpt-4.1`, Anthropic uses `claude-sonnet-4-20250514`, and OpenRouter uses `openai/gpt-4.1`. If multiple provider keys are present and `LLM_PROVIDER` is unset, OpenAI is selected first.
@@ -139,6 +156,12 @@ export PLANNER_LLM_PROVIDER=openrouter
 export PLANNER_MODEL=openrouter/anthropic/claude-opus-4.8
 ```
 
+The planner must return planner contract version 1 as strict JSON:
+`contract_version`, `summary`, `target_files`, `constraints`,
+`implementation_steps`, `tests_to_add`, `verification_commands`, `risks`, and
+`non_goals`. Autobot validates the contract before persisting it or passing it to
+downstream agents.
+
 `IMPLEMENT_HARNESS=openhands` is accepted by config but intentionally fails
 preflight until the OpenHands baseline adapter is wired.
 
@@ -150,10 +173,23 @@ Process one issue:
 ./cli run --repo owner/name --issue 123
 ```
 
+Process one Linear issue while opening the PR on GitHub:
+
+```sh
+ISSUE_TRACKER=linear LINEAR_TEAM_KEY=ENG ./cli run --repo owner/name --issue 123
+```
+
 Poll actionable issues once:
 
 ```sh
 ./cli watch --repo owner/name --once
+```
+
+Poll a Linear team queue once. The command lists actionable Linear issues from
+`LINEAR_TEAM_KEY` and processes them against the GitHub repo passed in `--repo`:
+
+```sh
+ISSUE_TRACKER=linear LINEAR_TEAM_KEY=ENG ./cli watch --repo owner/name --once
 ```
 
 Poll continuously:
@@ -174,7 +210,7 @@ Check live-run prerequisites without posting comments, pushing branches, or open
 ./cli doctor --repo owner/name --issue 123
 ```
 
-Live doctor checks Git, git author identity, Docker CLI and daemon access, GitHub credentials, LLM credentials, model names, LLM pricing env vars, implementation/planner harness settings, sandbox image/network/setup settings, and optional issue readability.
+Live doctor checks Git, git author identity, Docker CLI and daemon access, GitHub credentials, issue-tracker credentials, LLM credentials, model names, LLM pricing env vars, implementation/planner harness settings, sandbox image/network/setup settings, and optional issue readability.
 
 Live `run` and `watch` also run a read-only preflight before cloning or processing an issue. They fail fast when required GitHub or LLM credentials are missing, provider-specific model keys are missing, configured LLM pricing values are malformed, Git author identity is missing, Docker CLI or daemon access is unavailable, or sandbox setup configuration is unsafe. Use `doctor` for the same checks plus optional issue readability.
 An empty `SANDBOX_NETWORK` is treated as an invalid live configuration.
@@ -201,6 +237,42 @@ Run a local dry-run against a public issue body:
 Dry-run still reads the GitHub issue, but it writes only under `.autobot/work`, uses a generated local git repo, skips Docker, skips outward comments and labels, and returns `dry-run://draft-pr`.
 
 Set `GITHUB_TOKEN` or GitHub App credentials for dry-run reads when the public GitHub API rate limit is exhausted.
+
+## Harness Evals
+
+Local harness evals compare implementation harness behavior on repeatable issue
+fixtures without GitHub writes, Docker, Pi subprocesses, or live LLM calls:
+
+```sh
+./cli eval-harness --fixture python-add --harness legacy --mock-llm
+./cli eval-harness --fixture python-add --harness pi --mock-llm
+./cli eval-harness --fixture welcome-copy --harness pi --mock-llm
+```
+
+Fixtures live under `evals/harness/<fixture>/` with a tiny repo template,
+issue text, expected touched files, verification commands, pattern assertions,
+and deterministic mock outputs for `legacy` and `pi`. Results are appended as
+JSONL to `.autobot/evals/harness-results.jsonl`, with per-run workspaces and
+transcripts under `.autobot/evals/work/` and `.autobot/evals/logs/`.
+
+The result schema already records planner, implementer, reviewer, verification,
+cost, wall-time, transcript, and pass/fail scoring fields so future live
+Pi/OpenRouter-backed evals can populate the same JSONL contract.
+
+Provider-backed evals use the same fixture repo and result schema, but call the
+configured harness instead of fixture mock outputs:
+
+```sh
+export LLM_PROVIDER=openrouter
+export OPENROUTER_API_KEY=...
+export IMPLEMENT_HARNESS=legacy
+./cli eval-harness --fixture python-add --harness legacy
+```
+
+`--harness pi` uses the existing Pi RPC path inside Docker, so it also requires
+the Pi sandbox image, provider key passthrough, and sandbox network settings.
+Provider-backed evals never read GitHub issues, post comments, push branches, or
+open PRs; they only write local eval artifacts under `.autobot/evals/`.
 
 Command output includes the per-issue summary required for review:
 
@@ -248,6 +320,7 @@ draft.
 Implemented defaults:
 
 - GitHub Issues for `IssueTracker`
+- Linear Issues for `IssueTracker` when `ISSUE_TRACKER=linear`
 - GitHub git/API operations for `GitHost`
 - issue comments for `ChatChannel`
 - OpenAI, Anthropic, or OpenRouter HTTP calls for `LLM`
@@ -259,7 +332,18 @@ CI evidence combines legacy commit statuses and GitHub check runs for the pushed
 
 Issue reads include the newest two comment pages from GitHub pagination links, so recent clarification replies after the first 100 comments are still available to the resume loop without walking every page.
 
-Documented stubs are included for Linear, Jira, and Slack in `src/autobot/stubs.py`.
+Documented stubs are included for Jira and Slack in `src/autobot/stubs.py`.
+
+The Linear adapter intentionally keeps Autobot's existing integer issue-number
+state model for this first pass. It maps `LINEAR_TEAM_KEY=ENG` plus
+`issue_number=123` to Linear identifier `ENG-123`. This is backward-compatible
+with existing SQLite rows but cannot represent two Linear teams with the same
+numeric issue in one shared repo unless they use different state databases or
+one run changes `LINEAR_TEAM_KEY` intentionally. Linear comment resume markers
+use comment `createdAt` timestamps converted to integer microseconds, so
+waiting/resume works with the current numeric marker shape; comments with an
+identical timestamp are not totally ordered until Autobot grows a typed issue
+and comment reference model.
 
 Set `REVIEW_MODELS` to a comma-separated list to rotate reviewer lenses across more than one model. Provider-hinted model names route each review call to the matching OpenAI, Anthropic, or OpenRouter adapter when the corresponding key is present. If unset, all reviewers use `REVIEW_MODEL`.
 

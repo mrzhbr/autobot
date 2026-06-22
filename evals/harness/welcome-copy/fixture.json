@@ -1,0 +1,89 @@
+{
+  "issue": {
+    "title": "Normalize welcome copy names",
+    "body": "Welcome emails have inconsistent handling for names with extra spaces. Standardize the subject and body so the display name is stripped and title-cased everywhere, without changing the existing punctuation.",
+    "comments": [
+      {
+        "author": "support",
+        "body": "A customer reported `  ada lovelace ` showing up raw in the message body."
+      }
+    ]
+  },
+  "expectations": {
+    "changed_files": [
+      "notifications/formatters.py",
+      "notifications/messages.py"
+    ],
+    "verification_commands": [
+      "python3 -m unittest discover -s tests"
+    ],
+    "allowed_patterns": [
+      {
+        "path": "notifications/formatters.py",
+        "pattern": "name.strip().title()"
+      },
+      {
+        "path": "notifications/messages.py",
+        "pattern": "display_name(name)"
+      }
+    ],
+    "forbidden_patterns": [
+      {
+        "path": "notifications/messages.py",
+        "pattern": "{name}"
+      }
+    ],
+    "behavioral_assertions": [
+      "subject uses title-cased display name",
+      "message body uses the same normalized display name"
+    ]
+  },
+  "mock_runs": {
+    "legacy": {
+      "plan": [
+        "Normalize the subject line helper."
+      ],
+      "changes": [
+        {
+          "path": "notifications/formatters.py",
+          "content": "def display_name(name: str) -> str:\n    return name.strip().title()\n\n\ndef welcome_subject(name: str) -> str:\n    return f\"Welcome, {display_name(name)}\"\n"
+        }
+      ],
+      "test_commands": [],
+      "review_rounds": 1,
+      "blockers": [
+        "Did not update the message body path."
+      ],
+      "transcript": [
+        "legacy mock: focused on the formatter and missed the second call site"
+      ],
+      "input_tokens": 220,
+      "output_tokens": 58,
+      "dollars": 0.0
+    },
+    "pi": {
+      "plan": [
+        "Add a shared display-name helper.",
+        "Use it from both the subject and message body."
+      ],
+      "changes": [
+        {
+          "path": "notifications/formatters.py",
+          "content": "def display_name(name: str) -> str:\n    return name.strip().title()\n\n\ndef welcome_subject(name: str) -> str:\n    return f\"Welcome, {display_name(name)}\"\n"
+        },
+        {
+          "path": "notifications/messages.py",
+          "content": "from notifications.formatters import display_name\n\n\ndef welcome_message(name: str) -> str:\n    return f\"Hello {display_name(name)}, thanks for joining.\"\n"
+        }
+      ],
+      "test_commands": [],
+      "review_rounds": 1,
+      "transcript": [
+        "pi mock: traced both subject and body paths before editing"
+      ],
+      "input_tokens": 260,
+      "output_tokens": 82,
+      "dollars": 0.0
+    }
+  }
+}
