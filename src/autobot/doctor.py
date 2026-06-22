@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 from autobot.config import (
     LLM_KEY_ENV,
@@ -16,22 +15,13 @@ from autobot.config import (
     missing_price_vars,
     model_providers,
 )
+from autobot.doctor_harness import implementation_harness_check, planner_harness_check
+from autobot.doctor_result import CheckResult, CommandRunner
 from autobot.github import GitHubIssueTracker
+from autobot.linear import LinearIssueTracker
 from autobot.models import Issue
 from autobot.sandbox import SandboxError, ensure_no_secret_commands
 from autobot.scanner import redact_secret_like_values
-
-
-class CommandRunner(Protocol):
-    def __call__(
-        self,
-        command: list[str],
-        capture_output: bool,
-        text: bool,
-        check: bool,
-        timeout: int,
-    ) -> Any:
-        """Run a command and return an object with returncode/stdout/stderr."""
 
 
 class IssueReader(Protocol):
@@ -44,26 +34,13 @@ class IssueTrackerFactory(Protocol):
         """Build an issue reader."""
 
 
-@dataclass(frozen=True)
-class CheckResult:
-    name: str
-    status: str
-    message: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "message", redact_secret_like_values(self.message))
-
-    def to_dict(self) -> dict[str, str]:
-        return {"name": self.name, "status": self.status, "message": self.message}
-
-
 def run_doctor(
     config: Config,
     repo: str | None = None,
     issue: int | None = None,
     network: bool = True,
     command_runner: CommandRunner | None = None,
-    tracker_factory: IssueTrackerFactory = GitHubIssueTracker,
+    tracker_factory: IssueTrackerFactory | None = None,
 ) -> list[CheckResult]:
     runner = command_runner or cast(CommandRunner, subprocess.run)
     checks = [
@@ -71,6 +48,7 @@ def run_doctor(
         _git_identity_check(config, runner),
         _docker_check(config, runner),
         _github_token_check(config),
+        _issue_tracker_check(config),
         _agent_login_check(config),
         _llm_key_check(config),
         _model_check("triage model", config.triage_model),
@@ -79,8 +57,8 @@ def run_doctor(
         _planner_model_check(config),
         _llm_model_provider_check(config),
         _llm_pricing_check(config),
-        _implementation_harness_check(config, runner),
-        _planner_harness_check(config, runner),
+        implementation_harness_check(config, runner),
+        planner_harness_check(config, runner),
         _sandbox_backend_check(config),
         _sandbox_image_check(config),
         _sandbox_network_check(config),
@@ -158,12 +136,27 @@ def _github_token_check(config: Config) -> CheckResult:
         return CheckResult("github token", "skip", "dry-run does not need GITHUB_TOKEN")
     if config.github_token:
         return CheckResult("github token", "pass", "GITHUB_TOKEN is set")
-    return CheckResult("github token", "fail", "GITHUB_TOKEN is required for live runs")
+    return CheckResult("github token", "fail", "GITHUB_TOKEN is required for live runs and PRs")
+
+
+def _issue_tracker_check(config: Config) -> CheckResult:
+    if config.issue_tracker == "github":
+        return CheckResult("issue tracker", "pass", "github")
+    if config.issue_tracker != "linear":
+        return CheckResult("issue tracker", "fail", "ISSUE_TRACKER must be github or linear")
+    if config.dry_run:
+        return CheckResult("issue tracker", "skip", "dry-run does not need LINEAR_API_KEY")
+    if not config.linear_api_key:
+        return CheckResult("issue tracker", "fail", "LINEAR_API_KEY is required")
+    if not config.linear_team_key:
+        return CheckResult("issue tracker", "fail", "LINEAR_TEAM_KEY is required")
+    return CheckResult("issue tracker", "pass", f"linear team {config.linear_team_key}")
 
 
 def _agent_login_check(config: Config) -> CheckResult:
-    if config.agent_login:
-        return CheckResult("agent login", "pass", "AGENT_LOGIN/GITHUB_ACTOR is set")
+    login = config.linear_agent_login if config.issue_tracker == "linear" else config.agent_login
+    if login:
+        return CheckResult("agent login", "pass", "agent login is set")
     return CheckResult("agent login", "warn", "watch mode works best with AGENT_LOGIN set")
 
 
@@ -257,105 +250,6 @@ def _llm_pricing_check(config: Config) -> CheckResult:
     )
 
 
-def _implementation_harness_check(config: Config, command_runner: CommandRunner) -> CheckResult:
-    if config.dry_run or config.mock_llm:
-        return CheckResult(
-            "implementation harness",
-            "skip",
-            "dry-run or mock mode uses the legacy mock harness",
-        )
-    if config.implement_harness == "legacy":
-        return CheckResult("implementation harness", "pass", "legacy")
-    if config.implement_harness == "openhands":
-        return CheckResult("implementation harness", "fail", "OpenHands adapter is not wired yet")
-    if config.implement_harness != "pi":
-        return CheckResult("implementation harness", "fail", "unknown implementation harness")
-    provider = config.harness_llm_provider
-    key = LLM_KEY_ENV.get(provider or "")
-    if not key:
-        return CheckResult(
-            "implementation harness",
-            "fail",
-            "HARNESS_LLM_PROVIDER must be openai, anthropic, or openrouter",
-        )
-    if not os.getenv(key):
-        return CheckResult("implementation harness", "fail", f"{key} is required for Pi harness")
-    if config.sandbox_network == "none":
-        return CheckResult(
-            "implementation harness",
-            "fail",
-            "Pi harness runs inside Docker and requires SANDBOX_NETWORK with egress",
-        )
-    return _pi_cli_check(config, command_runner, "implementation harness", config.harness_model)
-
-
-def _planner_harness_check(config: Config, command_runner: CommandRunner) -> CheckResult:
-    if not config.planner_enabled:
-        return CheckResult("planner harness", "skip", "planner disabled")
-    if config.dry_run or config.mock_llm:
-        return CheckResult(
-            "planner harness",
-            "skip",
-            "dry-run or mock mode uses the legacy mock harness",
-        )
-    if config.planner_harness != "pi":
-        return CheckResult("planner harness", "fail", "unknown planner harness")
-    provider = config.planner_llm_provider
-    key = LLM_KEY_ENV.get(provider or "")
-    if not key:
-        return CheckResult(
-            "planner harness",
-            "fail",
-            "PLANNER_LLM_PROVIDER must be openai, anthropic, or openrouter",
-        )
-    if not os.getenv(key):
-        return CheckResult("planner harness", "fail", f"{key} is required for Pi planner")
-    if config.sandbox_network == "none":
-        return CheckResult(
-            "planner harness",
-            "fail",
-            "Pi planner runs inside Docker and requires SANDBOX_NETWORK with egress",
-        )
-    return _pi_cli_check(config, command_runner, "planner harness", config.planner_model)
-
-
-def _pi_cli_check(
-    config: Config,
-    command_runner: CommandRunner,
-    name: str,
-    model: str,
-) -> CheckResult:
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "--network",
-        config.sandbox_network,
-        config.sandbox_image,
-        "sh",
-        "-lc",
-        "PI_CODING_AGENT_DIR=/tmp/autobot-pi-agent PI_OFFLINE=1 pi --version",
-    ]
-    try:
-        result = command_runner(command, capture_output=True, text=True, check=False, timeout=30)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return CheckResult(name, "fail", str(exc))
-    if result.returncode != 0:
-        output = (result.stderr or result.stdout).strip()
-        return CheckResult(
-            name,
-            "fail",
-            "Pi CLI is not available in SANDBOX_IMAGE: " + output,
-        )
-    version_text = (result.stdout or result.stderr or "").strip()
-    version = version_text.splitlines()[0] if version_text else "available"
-    return CheckResult(
-        name,
-        "pass",
-        f"pi {version} using {model}",
-    )
-
-
 def _sandbox_image_check(config: Config) -> CheckResult:
     if config.dry_run:
         return CheckResult("sandbox image", "skip", "dry-run does not start Docker")
@@ -419,16 +313,28 @@ def _issue_check(
     repo: str | None,
     issue: int | None,
     network: bool,
-    tracker_factory: IssueTrackerFactory,
+    tracker_factory: IssueTrackerFactory | None,
 ) -> CheckResult:
     if not repo or issue is None:
-        return CheckResult("issue readable", "skip", "provide --repo and --issue to check GitHub")
+        return CheckResult("issue readable", "skip", "provide --repo and --issue to check")
     if not network:
         return CheckResult("issue readable", "skip", "network check disabled")
-    if not config.github_token and not config.dry_run:
+    if config.issue_tracker == "github" and not config.github_token and not config.dry_run:
         return CheckResult("issue readable", "skip", "GITHUB_TOKEN missing")
+    if config.issue_tracker == "linear" and not config.linear_api_key and not config.dry_run:
+        return CheckResult("issue readable", "skip", "LINEAR_API_KEY missing")
     try:
-        issue_data = tracker_factory(config.github_token, config.agent_login).get(repo, issue)
+        if tracker_factory is not None:
+            reader = tracker_factory(config.github_token, config.agent_login)
+        elif config.issue_tracker == "linear":
+            reader = LinearIssueTracker(
+                config.linear_api_key,
+                config.linear_agent_login,
+                config.linear_team_key,
+            )
+        else:
+            reader = GitHubIssueTracker(config.github_token, config.agent_login)
+        issue_data = reader.get(repo, issue)
     except Exception as exc:
         return CheckResult("issue readable", "fail", redact_secret_like_values(str(exc)))
     return CheckResult("issue readable", "pass", f"{issue_data.repo}#{issue_data.number}")
